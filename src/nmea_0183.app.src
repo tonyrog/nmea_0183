@@ -1,0 +1,12 @@
+{application, nmea_0183,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { nmea_0183_app, []}},
+  {env, []}
+ ]}.
