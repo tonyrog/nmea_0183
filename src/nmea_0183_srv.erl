@@ -206,7 +206,7 @@ handle_call({setopt, fake_utc, FakeUtc}, _From, State)
     {reply, ok, State#state { fake_utc = FakeUtc }};    
 handle_call({setopt, log_size, LogSize}, _From, State) 
   when is_integer(LogSize), LogSize >= 0, LogSize =< 128*1024 ->
-    %% Warning. It's not 100% safe to set log_size, fixe proper update!
+    %% Warning. It's not 100% safe to set log_size, fix proper update!
     {reply, ok, State#state { log_size = LogSize }};        
 handle_call({setopt, debug, Debug}, _From, State) 
   when is_boolean(Debug) ->
@@ -350,12 +350,10 @@ handle_info({timeout,_Timer,{report,Ref}}, State) ->
 		if Pos0 =< Pos1, Loop0 =:= Loop1 ->
 			Pos1 - Pos0;
 		   Pos1 =< Pos0, Loop0+1 =:= Loop1 ->
-			%% wrap, no overwrite
 			Size - (Pos0 - Pos1);
 		   true ->
 			Size
 		end,
-	    %% no wrap, no overwrite
 	    K1 = erlang:min(K0, Size div 2),
 	    S#subscription.pid ! {nmea_log, self(), Log, Pos0, K1, Size},
 	    Timer1 = erlang:start_timer(S#subscription.ival, 
@@ -452,8 +450,8 @@ open(DeviceName) ->
 	    case Info#file_info.type of
 		device ->
 		    case uart:open(DeviceName,
-				   [{ibaud,4800},{obaud,4800},
-				    {active,once},{buffer,1024},{packet,line}]) of
+				   [{baud,4800},{active,once},
+				    {buffer,1024},{packet,line}]) of
 			{ok,Port} ->
 			    {ok,device,Port};
 			Error ->
