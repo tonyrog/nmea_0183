@@ -1,0 +1,89 @@
+/*
+ * YANG description of a GPS options
+ *
+ */
+
+module gps {
+
+    namespace "http://rogvall.se/ns/gps";
+    prefix gps;
+
+    import uart { prefix uart; }
+
+    organization
+	"Rogvall Invest AB";
+
+    contact
+	"Tony Rogvall <tony@rogvall.se>";
+
+    description 
+	"GPS device description, access to latest known position";
+
+    revision 2012-04-26 {
+       description
+         "Initial revision.";
+    }
+
+    grouping gps-config {
+
+	leaf latitude {
+	    type decimal64 { fraction-digits 6; }
+	    config false;
+	    description "Latest known latitude";
+	}
+
+	leaf longitude {
+	    type decimal64 { fraction-digits 6; }
+	    config false;
+	    description "Latest known longitude";
+	}
+
+	leaf timestamp {
+	    type uint32;
+	    config false;
+	    description "Timestamp of latest known location
+                         UTC seconds, unix time (1970)";
+	}
+
+	choice gps-device {
+	    description "Select the device used to collect locations";
+
+	    mandatory true;
+
+	    container uart-device {
+		uses uart:uart-config {
+		    refine device { mandatory true; }
+		    refine baud   { default 4800; }
+		    refine stopb  { default 1; }
+		    refine parity { default none; }
+		}
+	    }
+
+	    container nmea-file {
+		leaf filename {
+		    type string;
+		    mandatory true;
+		    description "Filename of the GPS logfile to use
+                                 as source of location input. This data
+                                 used for demonstrations and simulation
+                                 puposes.";
+		}
+		leaf fake-utc {
+		    type boolean;
+		    description "Use current time instead of the timestamp
+                                 found in the log data.";
+		    default false;
+		}
+		leaf loop {
+		    type boolean;
+		    description "Restart input from the beginning of the file
+                                 once eof is reached. It is nice to edit the
+                                 data a bit so to create a loop. Using 
+                                 fake-utc is also nice to create a continues
+                                 stream of simulated locations.";
+		    default false;
+		}
+	    }
+	}
+    }
+}
