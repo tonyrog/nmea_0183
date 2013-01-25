@@ -553,10 +553,11 @@ write_timestamp(Date, Time, State) ->
     end.
 
 write_position(Lat, Long, State) ->
-    ?dbg("Lat:~f, Long:~f", [Lat, Long]),
+    io:format("Lat:~f, Long:~f~n", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
-    if State#state.timestamp =/= undefined, Size > 0 ->
+%%    if State#state.timestamp =/= undefined, Size > 0 ->
+    if Size > 0 ->
 	    ets:insert(State#state.log, {Pos, {position,Lat,Long}}),
 	    Pos1 = (Pos + 1) rem Size,
 	    Loop =  State#state.log_loop,
