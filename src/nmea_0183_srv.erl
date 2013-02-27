@@ -128,8 +128,8 @@ subscribe(Pid, IVal) ->
 %% @end
 %%--------------------------------------------------------------------
 init([DeviceName|Opts]) ->
-    Loop    = proplists:get_value(loop, Opts, false),
-    FakeUtc = proplists:get_value(fake_utc, Opts, false),
+    Loop       = proplists:get_value(loop, Opts, false),
+    FakeUtc    = proplists:get_value(fake_utc, Opts, false),
     ReopenIval = proplists:get_value(repopen_ival, Opts, ?DEFAULT_REOPEN_IVAL),
     LogSize    = proplists:get_value(log_size, Opts, 4096),
     Debug      = proplists:get_value(debug,    Opts, false),
