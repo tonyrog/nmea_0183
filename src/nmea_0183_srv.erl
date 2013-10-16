@@ -115,6 +115,8 @@ getopts(_Pid, [], Acc) ->
 	    
 subscribe(Pid, IVal) ->
     gen_server:call(Pid, {subscribe,self(),IVal}).
+unsubscribe(Pid, Ref) ->
+    gen_server:call(Pid, {unsubscribe,Ref}).
 	
 %%--------------------------------------------------------------------
 %% @private
