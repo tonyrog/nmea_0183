@@ -15,7 +15,7 @@
 %% API
 -export([start/1, start_link/1]).
 -export([start/2, start_link/2]).
-
+-export([subscribe/2, unsubscribe/2]).
 -compile(export_all).
 
 %% gen_server callbacks
@@ -115,6 +115,9 @@ getopts(_Pid, [], Acc) ->
 
 subscribe(Pid, IVal) ->
     gen_server:call(Pid, {subscribe,self(),IVal}).
+
+unsubscribe(Pid, Ref) ->
+    gen_server:call(Pid, {unsubscribe, Ref}).
 
 %%--------------------------------------------------------------------
 %% @private
