@@ -290,7 +290,13 @@ handle_cast(_Msg, State) ->
 
 handle_info({uart,U,Line}, State) when State#state.port =:= U ->
     uart:setopt(U, active, once),
-    nmea_line(Line, {undefined,undefined}, State);
+    DateTime =
+    if State#state.fake_utc ->
+           calendar:now_to_universal_time(os:timestamp());
+       true ->
+           {undefined,undefined}
+    end,
+    nmea_line(Line, DateTime, State);
 handle_info({uart_error,Port,enxio}, State) when State#state.port =:= Port ->
     %% any more action here?
     io:format("nmea_0183: enxio: Some one pulled the USB device?\n", []),
@@ -583,7 +589,7 @@ string_knot_kmh(Speed) ->
 	_ -> undefined
     end.
 
-string_date(String,undefined) ->
+string_date(String,undefined) when String =/= "" ->
     {D0,_} = string:to_integer(String),
     Year = (D0 rem 100) + 2000,
     D1 = D0 div 100,
@@ -594,7 +600,7 @@ string_date(String,undefined) ->
 string_date(_String,FakeDate) ->
     FakeDate.
 
-string_time(String,undefined) ->
+string_time(String,undefined) when String =/= "" ->
     {T0f,_} = string:to_float(String++"."),
     T0 = trunc(T0f),
     Sec = T0 rem 100,
