@@ -23,6 +23,7 @@
 	 terminate/2, code_change/3]).
 
 -define(DEFAULT_REOPEN_IVAL, 5000).  %% 5s between reopen attempts
+-define(DEFAULT_BAUD, 4800).
 
 -record(subscription,
 	{
@@ -54,7 +55,8 @@
 	  log_pos=0,       %% current insert position
 	  log_size=0,      %% size of the log
 	  log_loop=0,      %% log loop counter
-	  subscriptions=[] %% #subscription{}
+	  subscriptions=[], %% #subscription{},
+      baud=?DEFAULT_BAUD %% baud rate for uart
 	}).
 
 -ifdef(debug).
@@ -136,11 +138,13 @@ init([DeviceName|Opts]) ->
     ReopenIval = proplists:get_value(repopen_ival, Opts, ?DEFAULT_REOPEN_IVAL),
     LogSize    = proplists:get_value(log_size, Opts, 4096),
     Debug      = proplists:get_value(debug,    Opts, false),
+    Baud       = proplists:get_value(baud,    Opts, ?DEFAULT_BAUD),
     put(debug, Debug),
     Log = ets:new(nmea_0183_log, [protected]),
-    case open(DeviceName) of
+    case open(DeviceName, Baud) of
 	{ok,Type,Port} ->
 	    {ok, #state{ device=DeviceName,
+             baud=Baud,
 			 port=Port,
 			 port_type=Type,
 			 loop=Loop,
@@ -154,6 +158,7 @@ init([DeviceName|Opts]) ->
 	_Error ->
 	    Timer = erlang:start_timer(ReopenIval, self(), reopen),
 	    {ok, #state{ device=DeviceName,
+             baud=Baud,
 			 reopen_timer = Timer,
 			 reopen_ival = ReopenIval,
 			 loop=Loop,
@@ -285,7 +290,13 @@ handle_cast(_Msg, State) ->
 
 handle_info({uart,U,Line}, State) when State#state.port =:= U ->
     uart:setopt(U, active, once),
-    nmea_line(Line, {undefined,undefined}, State);
+    DateTime =
+    if State#state.fake_utc ->
+           calendar:now_to_universal_time(os:timestamp());
+       true ->
+           {undefined,undefined}
+    end,
+    nmea_line(Line, DateTime, State);
 handle_info({uart_error,Port,enxio}, State) when State#state.port =:= Port ->
     %% any more action here?
     io:format("nmea_0183: enxio: Some one pulled the USB device?\n", []),
@@ -328,7 +339,7 @@ handle_info({timeout,_Tmr,port_read}, State) ->
 
 handle_info({timeout,Timer,reopen}, State)
   when State#state.reopen_timer =:= Timer ->
-    case open(State#state.device) of
+    case open(State#state.device, State#state.baud) of
 	{ok,Type,Port} ->
 	    {noreply, State#state { port=Port,port_type=Type,
 				    open_time=os:timestamp(),
@@ -449,12 +460,14 @@ nmea_line(Line,{Date0,Time0},State) when is_list(Line) ->
     end.
 
 open(DeviceName) ->
+    open(DeviceName, ?DEFAULT_BAUD).
+open(DeviceName, Baud) ->
     case file:read_file_info(DeviceName) of
 	{ok,Info} ->
 	    case Info#file_info.type of
 		device ->
 		    case uart:open(DeviceName,
-				   [{baud,4800},{active,once},
+				   [{baud,Baud},{active,once},
 				    {buffer,1024},{packet,line}]) of
 			{ok,Port} ->
 			    {ok,device,Port};
@@ -576,7 +589,7 @@ string_knot_kmh(Speed) ->
 	_ -> undefined
     end.
 
-string_date(String,undefined) ->
+string_date(String,undefined) when String =/= "" ->
     {D0,_} = string:to_integer(String),
     Year = (D0 rem 100) + 2000,
     D1 = D0 div 100,
@@ -587,7 +600,7 @@ string_date(String,undefined) ->
 string_date(_String,FakeDate) ->
     FakeDate.
 
-string_time(String,undefined) ->
+string_time(String,undefined) when String =/= "" ->
     {T0f,_} = string:to_float(String++"."),
     T0 = trunc(T0f),
     Sec = T0 rem 100,
