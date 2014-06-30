@@ -598,23 +598,23 @@ fold_log(_Tab, _Pos, 0, _Size, _Fun, Acc) ->
 fold_log(Tab, Pos, Len, Size, Fun, Acc) ->
     case ets:lookup(Tab, Pos) of
 	[{_,{position,Lat,Long}}] ->
-	    Acc1 = Fun({position,
-			trunc((Lat+90.0)*100000),
-			trunc((Long+180.0)*100000)}, Acc),
-	    fold_log(Tab, (Pos+1) rem Size, Len-1, Size, 
+	    Acc1 = Fun({position,Lat,Long}, Acc),
+	    fold_log(Tab, (Pos+1) rem Size, Len-1, Size,
 		     Fun, Acc1);
 	[{_,{timestamp, Ts}}] ->
 	    Acc1 = Fun({timestamp, Ts}, Acc),
 	    fold_log(Tab, (Pos+1) rem Size, Len-1, Size, 
 		     Fun, Acc1)
     end.
-    
 
 string_knot_kmh(Speed) ->
     case string:to_float(Speed) of
 	{Knot,""} -> knot_to_kmh(Knot);
 	_ -> undefined
     end.
+
+integer_position({Lat, Long}) ->
+    {trunc((Lat+90.0)*100000),trunc((Long+180.0)*100000)}.
 
 string_date(String,undefined) ->
     {D0,_} = string:to_integer(String),
