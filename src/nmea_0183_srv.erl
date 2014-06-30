@@ -15,6 +15,10 @@
 %% API
 -export([start/1, start_link/1]).
 -export([start/2, start_link/2]).
+-export([subscribe/2, unsubscribe/2]).
+-export([setopts/2, getopts/2]).
+-export([read_log/1, fold_log/6]).
+-export([dump_log/0, dump_log/1, dump_log/4]).
 
 -compile(export_all).
 
@@ -534,12 +538,12 @@ set_state([], State) ->
 -define(UNIX_1970, 62167219200).
 
 write_timestamp(Date, Time, State) ->
-    GSec = calendar:datetime_to_gregorian_seconds({Date, Time}),
-    Timestamp = GSec - ?UNIX_1970,
-    ?dbg("Timestmp: ~w", [Timestamp]),
-    Pos  = State#state.log_pos,
     Size = State#state.log_size,
-    if Size > 0 ->
+    if Size > 0, Date =/= undefined, Time =/= undefined ->
+	    GSec = calendar:datetime_to_gregorian_seconds({Date, Time}),
+	    Timestamp = GSec - ?UNIX_1970,
+	    ?dbg("Timestmp: ~w", [Timestamp]),
+	    Pos  = State#state.log_pos,
 	    ets:insert(State#state.log, {Pos, {timestamp,Timestamp}}),
 	    Pos1 = (Pos + 1) rem Size,
 	    Loop =  State#state.log_loop,
@@ -554,7 +558,8 @@ write_position(Lat, Long, State) ->
     ?dbg("Lat:~f, Long:~f", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
-    if State#state.timestamp =/= undefined, Size > 0 ->
+%%    if State#state.timestamp =/= undefined, Size > 0 ->
+    if Size > 0 ->
 	    ets:insert(State#state.log, {Pos, {position,Lat,Long}}),
 	    Pos1 = (Pos + 1) rem Size,
 	    Loop =  State#state.log_loop,
@@ -563,6 +568,47 @@ write_position(Lat, Long, State) ->
        true ->
 	    State
     end.
+
+%% debug flush nmea_log events
+dump_log() ->
+    receive
+	Ent = {nmea_log,_NmeaPid,_Tab,_Pos,_Len,_Size} ->
+	    dump_log(Ent),
+	    dump_log()
+    after 0 ->
+	    ok
+    end.
+
+dump_log({nmea_log,_NmeaPid,Tab,Pos,Len,Size}) ->
+    dump_log(Tab,Pos,Len,Size).
+
+dump_log(Tab,Pos,Len,Size) ->
+    fold_log(Tab, Pos, Len, Size, 
+		     fun(P,_Acc) ->
+			     io:format("~w\n", [P])
+		     end, []).
+	    
+%% retreive data items from nmea log table
+read_log({nmea_log,_NmeaPid,Tab,Pos,Len,Size}) ->
+    Items=fold_log(Tab, Pos, Len, Size, fun(P,Acc) -> [P|Acc] end, []),
+    lists:reverse(Items).
+		       
+fold_log(_Tab, _Pos, 0, _Size, _Fun, Acc) ->
+    Acc;
+fold_log(Tab, Pos, Len, Size, Fun, Acc) ->
+    case ets:lookup(Tab, Pos) of
+	[{_,{position,Lat,Long}}] ->
+	    Acc1 = Fun({position,
+			trunc((Lat+90.0)*100000),
+			trunc((Long+180.0)*100000)}, Acc),
+	    fold_log(Tab, (Pos+1) rem Size, Len-1, Size, 
+		     Fun, Acc1);
+	[{_,{timestamp, Ts}}] ->
+	    Acc1 = Fun({timestamp, Ts}, Acc),
+	    fold_log(Tab, (Pos+1) rem Size, Len-1, Size, 
+		     Fun, Acc1)
+    end.
+    
 
 string_knot_kmh(Speed) ->
     case string:to_float(Speed) of
