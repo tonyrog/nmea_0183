@@ -505,7 +505,7 @@ verify_checksum([$$ | Cs]) ->  checksum(Cs, 0);
 verify_checksum(_) -> {error, bad_format}.
 
 checksum([$*,X1,X2|_], Sum) ->
-    case list_to_integer([X1,X2],16) of
+    case catch list_to_integer([X1,X2],16) of
 	Sum ->
 	    valid;
 	_ ->
