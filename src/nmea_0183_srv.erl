@@ -2,7 +2,7 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2012, Tony Rogvall
 %%% @doc
-%%%    NMEA 0183 
+%%%    NMEA 0183
 %%% @end
 %%% Created : 23 Feb 2012 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
@@ -27,6 +27,7 @@
 	 terminate/2, code_change/3]).
 
 -define(DEFAULT_REOPEN_IVAL, 5000).  %% 5s between reopen attempts
+-define(DEFAULT_BAUD, 4800).
 
 -record(subscription,
 	{
@@ -38,7 +39,7 @@
 	  loop
 	}).
 
--record(state, 
+-record(state,
 	{
 	  device,          %% device | file name
 	  port,            %% port
@@ -58,7 +59,8 @@
 	  log_pos=0,       %% current insert position
 	  log_size=0,      %% size of the log
 	  log_loop=0,      %% log loop counter
-	  subscriptions=[] %% #subscription{}
+	  subscriptions=[], %% #subscription{},
+      baud=?DEFAULT_BAUD %% baud rate for uart
 	}).
 
 -ifdef(debug).
@@ -105,7 +107,7 @@ setopts(_Pid, []) ->
 
 getopts(Pid, Keys) ->
     getopts(Pid, Keys, []).
-    
+
 
 getopts(Pid, [Key|Keys], Acc) ->
     case gen_server:call(Pid, {getopt, Key}) of
@@ -116,12 +118,13 @@ getopts(Pid, [Key|Keys], Acc) ->
     end;
 getopts(_Pid, [], Acc) ->
     lists:reverse(Acc).
-	    
+
 subscribe(Pid, IVal) ->
     gen_server:call(Pid, {subscribe,self(),IVal}).
+
 unsubscribe(Pid, Ref) ->
     gen_server:call(Pid, {unsubscribe,Ref}).
-	
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -139,14 +142,16 @@ init([DeviceName|Opts]) ->
     ReopenIval = proplists:get_value(repopen_ival, Opts, ?DEFAULT_REOPEN_IVAL),
     LogSize    = proplists:get_value(log_size, Opts, 4096),
     Debug      = proplists:get_value(debug,    Opts, false),
+    Baud       = proplists:get_value(baud,    Opts, ?DEFAULT_BAUD),
     put(debug, Debug),
     Log = ets:new(nmea_0183_log, [protected]),
-    case open(DeviceName) of
+    case open(DeviceName, Baud) of
 	{ok,Type,Port} ->
-	    {ok, #state{ device=DeviceName, 
-			 port=Port, 
-			 port_type=Type, 
-			 loop=Loop, 
+	    {ok, #state{ device=DeviceName,
+             baud=Baud,
+			 port=Port,
+			 port_type=Type,
+			 loop=Loop,
 			 fake_utc=FakeUtc,
 			 reopen_ival = ReopenIval,
 			 open_time=os:timestamp(),
@@ -157,9 +162,10 @@ init([DeviceName|Opts]) ->
 	_Error ->
 	    Timer = erlang:start_timer(ReopenIval, self(), reopen),
 	    {ok, #state{ device=DeviceName,
+             baud=Baud,
 			 reopen_timer = Timer,
 			 reopen_ival = ReopenIval,
-			 loop=Loop, 
+			 loop=Loop,
 			 fake_utc=FakeUtc,
 			 log = Log,
 			 log_size = LogSize,
@@ -195,26 +201,26 @@ handle_call({setopt,device,DeviceName}, _From, State) ->
 		    ok
 	    end,
 	    Timer = erlang:start_timer(1, self(), reopen),
-	    State1 = State#state { port = undefined, 
+	    State1 = State#state { port = undefined,
 				   port_type = undefined,
-				   reopen_timer = Timer, 
+				   reopen_timer = Timer,
 				   device = DeviceName },
 	    {reply, ok, State1}
     end;
-handle_call({setopt,reopen_ival,IVal},_From,State) 
+handle_call({setopt,reopen_ival,IVal},_From,State)
   when is_integer(IVal), IVal >= 1000, IVal =< 3600000 ->
     {reply, ok, State#state { reopen_ival = IVal }};
-handle_call({setopt, loop, Loop},_From,State) 
+handle_call({setopt, loop, Loop},_From,State)
   when is_boolean(Loop) ->
-    {reply, ok, State#state { loop = Loop }};    
-handle_call({setopt, fake_utc, FakeUtc}, _From, State) 
+    {reply, ok, State#state { loop = Loop }};
+handle_call({setopt, fake_utc, FakeUtc}, _From, State)
   when is_boolean(FakeUtc) ->
-    {reply, ok, State#state { fake_utc = FakeUtc }};    
-handle_call({setopt, log_size, LogSize}, _From, State) 
+    {reply, ok, State#state { fake_utc = FakeUtc }};
+handle_call({setopt, log_size, LogSize}, _From, State)
   when is_integer(LogSize), LogSize >= 0, LogSize =< 128*1024 ->
     %% Warning. It's not 100% safe to set log_size, fix proper update!
-    {reply, ok, State#state { log_size = LogSize }};        
-handle_call({setopt, debug, Debug}, _From, State) 
+    {reply, ok, State#state { log_size = LogSize }};
+handle_call({setopt, debug, Debug}, _From, State)
   when is_boolean(Debug) ->
     put(debug, Debug),
     {reply, ok, State};
@@ -234,7 +240,7 @@ handle_call({getopt,log_pos},_From,State) ->
 handle_call({getopt,debug},_From,State) ->
     {reply, {ok,get(debug)}, State};
 
-handle_call({subscribe,Pid,IVal}, _From, State) when 
+handle_call({subscribe,Pid,IVal}, _From, State) when
       is_pid(Pid), is_integer(IVal), IVal >= 100, IVal =< 60000 ->
     %% IVal is the report interval, must calculate aprox min/max!
     Mon = erlang:monitor(process, Pid),
@@ -288,7 +294,13 @@ handle_cast(_Msg, State) ->
 
 handle_info({uart,U,Line}, State) when State#state.port =:= U ->
     uart:setopt(U, active, once),
-    nmea_line(Line, {undefined,undefined}, State);
+    DateTime =
+    if State#state.fake_utc ->
+           calendar:now_to_universal_time(os:timestamp());
+       true ->
+           {undefined,undefined}
+    end,
+    nmea_line(Line, DateTime, State);
 handle_info({uart_error,Port,enxio}, State) when State#state.port =:= Port ->
     %% any more action here?
     io:format("nmea_0183: enxio: Some one pulled the USB device?\n", []),
@@ -305,14 +317,14 @@ handle_info({timeout,_Tmr,port_read}, State) ->
 		    Length = length(Line),
 		    Timeout = trunc(1000*(Length/480)),
 		    erlang:start_timer(Timeout, self(), port_read),
-		    DateTime = 
+		    DateTime =
 			if State#state.fake_utc ->
 				calendar:now_to_universal_time(os:timestamp());
 			   true ->
 				{undefined,undefined}
 			end,
 		    nmea_line(Line,DateTime,State);
-		eof -> 
+		eof ->
 		    %% note! empty files will be read 10 times per sec!!!
 		    %%  maybe add warning if file is empty or close to it
 		    if State#state.loop ->
@@ -328,10 +340,10 @@ handle_info({timeout,_Tmr,port_read}, State) ->
 	_ ->
 	    {noreply, State}
     end;
-    
-handle_info({timeout,Timer,reopen}, State) 
+
+handle_info({timeout,Timer,reopen}, State)
   when State#state.reopen_timer =:= Timer ->
-    case open(State#state.device) of
+    case open(State#state.device, State#state.baud) of
 	{ok,Type,Port} ->
 	    {noreply, State#state { port=Port,port_type=Type,
 				    open_time=os:timestamp(),
@@ -352,7 +364,7 @@ handle_info({timeout,_Timer,{report,Ref}}, State) ->
 	    Size = State#state.log_size,
 	    Pos1 = State#state.log_pos,
 	    Loop1 = State#state.log_loop,
-	    K0 = 
+	    K0 =
 		if Pos0 =< Pos1, Loop0 =:= Loop1 ->
 			Pos1 - Pos0;
 		   Pos1 =< Pos0, Loop0+1 =:= Loop1 ->
@@ -362,7 +374,7 @@ handle_info({timeout,_Timer,{report,Ref}}, State) ->
 		end,
 	    K1 = erlang:min(K0, Size div 2),
 	    S#subscription.pid ! {nmea_log, self(), Log, Pos0, K1, Size},
-	    Timer1 = erlang:start_timer(S#subscription.ival, 
+	    Timer1 = erlang:start_timer(S#subscription.ival,
 					self(), {report,S#subscription.mon}),
 	    Pos = (Pos0 + K1) rem Size,
 	    S1 = S#subscription { timer=Timer1,pos=Pos,loop=Loop1},
@@ -423,6 +435,7 @@ nmea_line(Line,{Date0,Time0},State) when is_list(Line) ->
 			      [{lat, string_lat_dec(Lat,LatNS)},
 			       {long, string_long_dec(Long,LongEW)},
 			       {time, string_time(UTC,Time0)}], State);
+
 		["$GPRMC",UTC,Status,Lat,LatNS,Long,LongEW,
 		 Speed,_TrackAngle,Date | _Various] ->
 		    %% _Various may be variant IGNORE!
@@ -451,12 +464,14 @@ nmea_line(Line,{Date0,Time0},State) when is_list(Line) ->
     end.
 
 open(DeviceName) ->
+    open(DeviceName, ?DEFAULT_BAUD).
+open(DeviceName, Baud) ->
     case file:read_file_info(DeviceName) of
 	{ok,Info} ->
 	    case Info#file_info.type of
 		device ->
 		    case uart:open(DeviceName,
-				   [{baud,4800},{active,once},
+				   [{baud,Baud},{active,once},
 				    {buffer,1024},{packet,line}]) of
 			{ok,Port} ->
 			    {ok,device,Port};
@@ -464,7 +479,7 @@ open(DeviceName) ->
 			    Error
 		    end;
 		regular ->
-		    %% warn if file size is suspiciously small 
+		    %% warn if file size is suspiciously small
 		    if Info#file_info.size < 80 ->
 			    io:format("WARNING: file ~s only has ~w bytes of data\n", [DeviceName, Info#file_info.size]);
 		       true ->
@@ -511,7 +526,7 @@ set_state(true, KVs, State) ->
 	   true ->
 		State1
 	end,
-    State3 = 
+    State3 =
 	if Time0 =/= Time1; Date0 =/= Date1 ->
 		write_timestamp(Date1, Time1, State2);
 	   true ->
@@ -537,6 +552,9 @@ set_state([], State) ->
 
 -define(UNIX_1970, 62167219200).
 
+write_timestamp(undefined, _Time, State) ->
+    State;
+
 write_timestamp(Date, Time, State) ->
     Size = State#state.log_size,
     if Size > 0, Date =/= undefined, Time =/= undefined ->
@@ -548,14 +566,14 @@ write_timestamp(Date, Time, State) ->
 	    Pos1 = (Pos + 1) rem Size,
 	    Loop =  State#state.log_loop,
 	    Loop1 = if Pos1 =:= 0 -> Loop + 1; true -> Loop end,
-	    State#state { log_pos = Pos1, log_loop=Loop1, 
+	    State#state { log_pos = Pos1, log_loop=Loop1,
 			  timestamp = Timestamp };
        true ->
 	    State
     end.
 
 write_position(Lat, Long, State) ->
-    ?dbg("Lat:~f, Long:~f", [Lat, Long]),
+    io:format("Lat:~f, Long:~f~n", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
 %%    if State#state.timestamp =/= undefined, Size > 0 ->
@@ -616,7 +634,7 @@ string_knot_kmh(Speed) ->
 integer_position({Lat, Long}) ->
     {trunc((Lat+90.0)*100000),trunc((Long+180.0)*100000)}.
 
-string_date(String,undefined) ->
+string_date(String,undefined) when String =/= "" ->
     {D0,_} = string:to_integer(String),
     Year = (D0 rem 100) + 2000,
     D1 = D0 div 100,
@@ -627,7 +645,7 @@ string_date(String,undefined) ->
 string_date(_String,FakeDate) ->
     FakeDate.
 
-string_time(String,undefined) ->    
+string_time(String,undefined) when String =/= "" ->
     {T0f,_} = string:to_float(String++"."),
     T0 = trunc(T0f),
     Sec = T0 rem 100,
@@ -638,7 +656,7 @@ string_time(String,undefined) ->
     {Hour,Min,Sec};
 string_time(_String,FakeTime) ->
     FakeTime.
-    
+
 string_lat_dec(Lat,"N") -> string_deg_to_dec(Lat);
 string_lat_dec(Lat,"S") -> -string_deg_to_dec(Lat);
 string_lat_dec(_Lat,_) -> undefined.
@@ -647,7 +665,7 @@ string_long_dec(Long,"E") -> string_deg_to_dec(Long);
 string_long_dec(Long,"W") -> -string_deg_to_dec(Long);
 string_long_dec(_Long,_) -> undefined.
 
-%% convert degree to decimal	    
+%% convert degree to decimal
 string_deg_to_dec(String) ->
     case string:to_float(String) of
 	{Deg,""} -> deg_to_dec(Deg);
@@ -658,6 +676,6 @@ deg_to_dec(Deg) ->
     D = trunc(Deg) div 100,
     Min  = Deg - (float(D) * 100.0),
     D + (Min / 60.0).
-    
+
 knot_to_kmh(Knot) ->
     Knot*1.852.
