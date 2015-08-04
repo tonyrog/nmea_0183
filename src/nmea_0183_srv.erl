@@ -505,7 +505,7 @@ verify_checksum([$$ | Cs]) ->  checksum(Cs, 0);
 verify_checksum(_) -> {error, bad_format}.
 
 checksum([$*,X1,X2|_], Sum) ->
-    case list_to_integer([X1,X2],16) of
+    case catch list_to_integer([X1,X2],16) of
 	Sum ->
 	    valid;
 	_ ->
@@ -573,7 +573,7 @@ write_timestamp(Date, Time, State) ->
     end.
 
 write_position(Lat, Long, State) ->
-    io:format("Lat:~f, Long:~f~n", [Lat, Long]),
+    ?dbg("Lat:~f, Long:~f~n", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
 %%    if State#state.timestamp =/= undefined, Size > 0 ->
