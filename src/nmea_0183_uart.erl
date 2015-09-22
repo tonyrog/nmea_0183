@@ -66,17 +66,6 @@
 
 -define(COMMAND_TIMEOUT, 500).
 
--define(NGT_STARTUP_SEQ, <<16#11, 16#02, 16#00>>).
-
--define(STX, 16#02).  %% Start packet
--define(ETX, 16#03).  %% End packet
--define(DLE, 16#10).  %% Start pto encode a STX or ETX send DLE+STX or DLE+ETX
-
--define(N2K_MSG_RECEIVED, 16#93). %% Receive standard N2K message
--define(N2K_MSG_SEND,     16#94). %% Send N2K message
--define(NGT_MSG_RECEIVED, 16#A0). %% Receive NGT specific message
--define(NGT_MSG_SEND,     16#A1). %% Send NGT message
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -256,13 +245,13 @@ handle_cast(_Mesg, S) ->
 handle_info({uart,U,Line}, S = #s { receiver = {_Mod,_Pid,If}}) 
 	    when S#s.uart =:= U ->
     case nmea_0183_lib:parse(Line,If) of
-	{ok,Message} ->
-	    uart:setopt(U, active, once),
-	    input(Message, S),
-	    {noreply, S};
 	{error,Reason} ->
 	    uart:setopt(U, active, once),
 	    lager:warning("nmea_0183_uart: read error ~w",[Reason]),
+	    {noreply, S};
+	Message ->
+	    uart:setopt(U, active, once),
+	    input(Message, S),
 	    {noreply, S}
     end;
 handle_info({uart_error,U,Reason}, S) when U =:= S#s.uart ->
