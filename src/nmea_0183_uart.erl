@@ -61,7 +61,7 @@
 
 
 -define(DEFAULT_RETRY_INTERVAL,  0183).
--define(DEFAULT_BAUDRATE,        115200).
+-define(DEFAULT_BAUDRATE,        4800).
 -define(DEFAULT_IF,              0).
 
 -define(COMMAND_TIMEOUT, 500).
