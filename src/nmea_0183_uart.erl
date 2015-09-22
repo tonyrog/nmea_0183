@@ -359,10 +359,7 @@ join(Module, undefined, Arg) when is_atom(Module) ->
 %%  Format message as $ <id> (, <field>)* '*' <checsum>\r\n
 %%
 send_message(Message, S) when is_record(Message, nmea_message) ->
-    Body = iolist_to_binary(join([Message#nmea_message.id|
-				  Message#nmea_message.fields], $,)),
-    Sum = nmea_0183_lib:checksum(Body),
-    Data = [$$,Body,$*,tl(integer_to_list(Sum+16#100,16)), "\r\n"],
+    Data = nmea_0183_lib:format(Message),
     S1 = count(output_packets, S),
     {uart:send(Data), S1}.
 
@@ -387,9 +384,3 @@ input_packet(Packet,{Module, Pid, _If}) when is_atom(Module), is_pid(Pid) ->
 count(Counter,S) ->
     nmea_0183_counter:update(Counter, 1),
     S.
-
-join([H],_Sep) -> [H];
-join([H|T],Sep) -> [H,Sep|join(T,Sep)];
-join([],_Sep) -> [].
-
-

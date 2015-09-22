@@ -7,19 +7,21 @@
 
 -module(nmea_0183_record).
 
+-include("../include/nmea_0183.hrl").
+
 -compile(export_all).
 
-start(DeviceName) ->
+start() ->
     FileName = filename:join(code:priv_dir(nmea_0183), "latest_log.gps"),
-    start(DeviceName, FileName, -1).
+    start(FileName, -1).
 
-start(DeviceName, FileName) ->
-    start(DeviceName, FileName, -1).
+start(FileName) ->
+    start(FileName, -1).
 
-start(DeviceName, FileName, MaxTime) ->
+start(FileName, MaxTime) ->
     case file:open(FileName, [raw,binary,write]) of
 	{ok,Fd} ->
-	    try start_fd(DeviceName, Fd, MaxTime) of
+	    try start_fd(Fd, MaxTime) of
 		ok -> ok
 	    catch
 		error:Reason ->
@@ -31,29 +33,23 @@ start(DeviceName, FileName, MaxTime) ->
 	    Error
     end.
 
-start_fd(DeviceName, Fd, MaxTime) ->
-    case uart:open(DeviceName,
-		   [{ibaud,4800},{obaud,4800},
-		    {active,once},{buffer,1024},{packet,line}]) of
-	{ok,Uart} ->
-	    if MaxTime > 0 ->
-		    erlang:start_timer(MaxTime*1000, self(), stop_record);
-	       true ->
-		    ok
-	    end,
-	    Res = loop(Uart, Fd),
-	    uart:close(Uart),
-	    Res
-    end.
+start_fd(Fd, MaxTime) ->
+    ok = nmea_0183_router:attach(),
+    if MaxTime > 0 ->
+	    erlang:start_timer(MaxTime*1000, self(), stop_record);
+       true ->
+	    ok
+    end,
+    Res = loop(Fd),
+    file:close(Fd),
+    Res.
 
-loop(Uart, Fd) ->
+loop(Fd) ->
     receive
-	{uart,Uart,Line} ->
-	    uart:setopts(Uart, [{active,once}]),
-	    file:write(Fd, Line),
-	    loop(Uart, Fd);
-	{uart_error,Uart,Reason} ->
-	    {error,Reason};
+	Message when is_record(Message, nmea_message) ->
+	    Data = nmea_0183_lib:format(Message),
+	    file:write(Fd, Data),
+	    loop(Fd);
 	{timeout, _Ref, stop_record} ->
 	    ok
     end.
