@@ -1,4 +1,4 @@
-%%%---- BEGIN COPYRIGHT -------------------------------------------------------
+%%%---- BEGIN COPYRIGHT --------------------------------------------------------
 %%%
 %%% Copyright (C) 2015, Rogvall Invest AB, <tony@rogvall.se>
 %%%
@@ -13,28 +13,25 @@
 %%% This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
 %%% KIND, either express or implied.
 %%%
-%%%---- END COPYRIGHT ---------------------------------------------------------
+%%%---- END COPYRIGHT ----------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%% NMEA 0183 application.
-%%%
-%%% Created:  21 Sep 2015 by Tony Rogvall
+%%% File    : nmea_2000.hrl
+%%% Description : nmea 2000 application definitions
+%%% Created : September 2015 by Tony Rogvall
 %%% @end
-%%%-------------------------------------------------------------------
--module(nmea_0183_app).
+-ifndef(__NMEA_0183_HRL__).
+-define(__NMEA_0183_HRL__, true).
 
--behaviour(application).
+-define(NO_TIMESTAMP, -1).
 
-%% Application callbacks
--export([start/2, stop/1]).
+-record(nmea_message,
+	{
+	  id :: binary(),            %% PGN name like <<"$GPRMC">>
+	  intf = 0 :: integer(),     %% input/output interface number
+	  fields = [] :: [binary()], %% data fields
+	  ts = ?NO_TIMESTAMP
+	}).
 
-%% ===================================================================
-%% Application callbacks
-%% ===================================================================
-
-start(_StartType, _StartArgs) ->
-    nmea_0183_sup:start_link().
-
-stop(_State) ->
-    ok.
+-endif.

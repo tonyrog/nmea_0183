@@ -2,19 +2,23 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2012, Tony Rogvall
 %%% @doc
-%%%    NMEA 0183
+%%%    NMEA 0183 GPS application
+%%%    Usage: first start the nmea_0183_router with some backend
+%%%    Then start this application.
 %%% @end
 %%% Created : 23 Feb 2012 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
 -module(nmea_0183_srv).
 
+-include_lib("lager/include/log.hrl").
 -include_lib("kernel/include/file.hrl").
+-include("../include/nmea_0183.hrl").
 
 -behaviour(gen_server).
 
 %% API
+-export([start/0, start_link/0]).
 -export([start/1, start_link/1]).
--export([start/2, start_link/2]).
 -export([subscribe/2, unsubscribe/2]).
 -export([setopts/2, getopts/2]).
 -export([read_log/1, fold_log/6]).
@@ -26,8 +30,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--define(DEFAULT_REOPEN_IVAL, 5000).  %% 5s between reopen attempts
--define(DEFAULT_BAUD, 4800).
 
 -record(subscription,
 	{
@@ -41,14 +43,6 @@
 
 -record(state,
 	{
-	  device,          %% device | file name
-	  port,            %% port
-	  port_type,       %% device | regular
-	  open_time,       %% timestamp when device was opened
-	  loop = false,    %% loop at eof, when file input
-	  fake_utc=false,  %% adjust UTC in file input
-	  reopen_timer,    %% reopen timer
-	  reopen_ival,     %%  and it's interval
 	  long=0.0,        %% last knonw longitude East=(>=0),West=(< 0)
 	  lat=0.0,         %% last known latitude  North=(>=0),South(<0)
 	  timestamp,       %% UTC seconds
@@ -59,23 +53,8 @@
 	  log_pos=0,       %% current insert position
 	  log_size=0,      %% size of the log
 	  log_loop=0,      %% log loop counter
-	  subscriptions=[], %% #subscription{},
-      baud=?DEFAULT_BAUD %% baud rate for uart
+	  subscriptions=[] %% #subscription{},
 	}).
-
--ifdef(debug).
--define(dbg(Fmt,As),
-	case get(debug) of
-	    true -> io:format("~s:~w: "++(Fmt)++"\n",[?FILE,?LINE|(As)]);
-	    _ -> ok
-	end).
--else.
--define(dbg(Fmt,As), ok).
--endif.
-
-%%%===================================================================
-%%% API
-%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -85,15 +64,15 @@
 %% @end
 %%--------------------------------------------------------------------
 
-start_link(DeviceName) ->
-    start_link(DeviceName,[{loop,true},{fake_utc,true}]).
-start_link(DeviceName,Opts) ->
-    gen_server:start_link(?MODULE, [DeviceName|Opts], []).
+start_link() ->
+    start_link([]).
+start_link(Opts) ->
+    gen_server:start_link(?MODULE, Opts, []).
 
-start(DeviceName) ->
-    start(DeviceName,[{loop,true},{fake_utc,true}]).
-start(DeviceName,Opts) ->
-    gen_server:start(?MODULE, [DeviceName|Opts], []).
+start() ->
+    start([]).
+start(Opts) ->
+    gen_server:start(?MODULE, Opts, []).
 
 setopts(Pid, [{Key,Value}|Opts]) ->
     case gen_server:call(Pid, {setopt,Key,Value}) of
@@ -107,7 +86,6 @@ setopts(_Pid, []) ->
 
 getopts(Pid, Keys) ->
     getopts(Pid, Keys, []).
-
 
 getopts(Pid, [Key|Keys], Acc) ->
     case gen_server:call(Pid, {getopt, Key}) of
@@ -136,42 +114,11 @@ unsubscribe(Pid, Ref) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([DeviceName|Opts]) ->
-    Loop       = proplists:get_value(loop, Opts, false),
-    FakeUtc    = proplists:get_value(fake_utc, Opts, false),
-    ReopenIval = proplists:get_value(repopen_ival, Opts, ?DEFAULT_REOPEN_IVAL),
+init(Opts) ->
     LogSize    = proplists:get_value(log_size, Opts, 4096),
-    Debug      = proplists:get_value(debug,    Opts, false),
-    Baud       = proplists:get_value(baud,    Opts, ?DEFAULT_BAUD),
-    put(debug, Debug),
     Log = ets:new(nmea_0183_log, [protected]),
-    case open(DeviceName, Baud) of
-	{ok,Type,Port} ->
-	    {ok, #state{ device=DeviceName,
-             baud=Baud,
-			 port=Port,
-			 port_type=Type,
-			 loop=Loop,
-			 fake_utc=FakeUtc,
-			 reopen_ival = ReopenIval,
-			 open_time=os:timestamp(),
-			 log = Log,
-			 log_size = LogSize,
-			 log_pos  = 0
-		       }};
-	_Error ->
-	    Timer = erlang:start_timer(ReopenIval, self(), reopen),
-	    {ok, #state{ device=DeviceName,
-             baud=Baud,
-			 reopen_timer = Timer,
-			 reopen_ival = ReopenIval,
-			 loop=Loop,
-			 fake_utc=FakeUtc,
-			 log = Log,
-			 log_size = LogSize,
-			 log_pos  = 0
-		       }}
-    end.
+    ok = nmea_0183_router:attach([<<"GPGGA">>,<<"GPRMC">>,<<"GPGSA">>]),
+    {ok, #state{ log = Log, log_size = LogSize, log_pos  = 0 }}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -187,58 +134,15 @@ init([DeviceName|Opts]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({setopt,device,DeviceName}, _From, State) ->
-    %% close device if open and reopen
-    if State#state.reopen_timer =/= undefined ->
-	    {reply, ok, State#state { device = DeviceName }};
-       true ->
-	    case State#state.port_type of
-		regular ->
-		    file:close(State#state.port);
-		device ->
-		    uart:close(State#state.port);
-		_ ->
-		    ok
-	    end,
-	    Timer = erlang:start_timer(1, self(), reopen),
-	    State1 = State#state { port = undefined,
-				   port_type = undefined,
-				   reopen_timer = Timer,
-				   device = DeviceName },
-	    {reply, ok, State1}
-    end;
-handle_call({setopt,reopen_ival,IVal},_From,State)
-  when is_integer(IVal), IVal >= 1000, IVal =< 3600000 ->
-    {reply, ok, State#state { reopen_ival = IVal }};
-handle_call({setopt, loop, Loop},_From,State)
-  when is_boolean(Loop) ->
-    {reply, ok, State#state { loop = Loop }};
-handle_call({setopt, fake_utc, FakeUtc}, _From, State)
-  when is_boolean(FakeUtc) ->
-    {reply, ok, State#state { fake_utc = FakeUtc }};
 handle_call({setopt, log_size, LogSize}, _From, State)
   when is_integer(LogSize), LogSize >= 0, LogSize =< 128*1024 ->
     %% Warning. It's not 100% safe to set log_size, fix proper update!
     {reply, ok, State#state { log_size = LogSize }};
-handle_call({setopt, debug, Debug}, _From, State)
-  when is_boolean(Debug) ->
-    put(debug, Debug),
-    {reply, ok, State};
 
-handle_call({getopt,device},_From,State) ->
-    {reply, {ok,State#state.device}, State};
-handle_call({getopt,reopen_ival},_From,State) ->
-    {reply, {ok,State#state.reopen_ival}, State};
-handle_call({getopt,loop},_From,State) ->
-    {reply, {ok,State#state.loop}, State};
-handle_call({getopt,fake_utc},_From,State) ->
-    {reply, {ok,State#state.fake_utc}, State};
 handle_call({getopt,log_size},_From,State) ->
     {reply, {ok,State#state.log_size}, State};
 handle_call({getopt,log_pos},_From,State) ->
     {reply, {ok,State#state.log_pos}, State};
-handle_call({getopt,debug},_From,State) ->
-    {reply, {ok,get(debug)}, State};
 
 handle_call({subscribe,Pid,IVal}, _From, State) when
       is_pid(Pid), is_integer(IVal), IVal >= 100, IVal =< 60000 ->
@@ -292,68 +196,8 @@ handle_cast(_Msg, State) ->
 %% OM    - Omega Navigation
 %% II    - Integrated instrumentation
 
-handle_info({uart,U,Line}, State) when State#state.port =:= U ->
-    uart:setopt(U, active, once),
-    DateTime =
-    if State#state.fake_utc ->
-           calendar:now_to_universal_time(os:timestamp());
-       true ->
-           {undefined,undefined}
-    end,
-    nmea_line(Line, DateTime, State);
-handle_info({uart_error,Port,enxio}, State) when State#state.port =:= Port ->
-    %% any more action here?
-    io:format("nmea_0183: enxio: Some one pulled the USB device?\n", []),
-    {noreply, State};
-handle_info({uart_closed,Port}, State) when State#state.port =:= Port ->
-    Timer = erlang:start_timer(State#state.reopen_ival, self(), reopen),
-    {noreply, State#state { port=undefined, reopen_timer=Timer}};
-handle_info({timeout,_Tmr,port_read}, State) ->
-    %% read next line from regular file
-    case State#state.port_type of
-	regular ->
-	    case file:read_line(State#state.port) of
-		{ok,Line} ->
-		    Length = length(Line),
-		    Timeout = trunc(1000*(Length/480)),
-		    erlang:start_timer(Timeout, self(), port_read),
-		    DateTime =
-			if State#state.fake_utc ->
-				calendar:now_to_universal_time(os:timestamp());
-			   true ->
-				{undefined,undefined}
-			end,
-		    nmea_line(Line,DateTime,State);
-		eof ->
-		    %% note! empty files will be read 10 times per sec!!!
-		    %%  maybe add warning if file is empty or close to it
-		    if State#state.loop ->
-			    file:position(State#state.port, bof),
-			    erlang:start_timer(100, self(), port_read),
-			    {noreply, State};
-		       true ->
-			    file:close(State#state.port),
-			    {noreply, State#state { port=undefined,
-						    port_type=undefined }}
-		    end
-	    end;
-	_ ->
-	    {noreply, State}
-    end;
-
-handle_info({timeout,Timer,reopen}, State)
-  when State#state.reopen_timer =:= Timer ->
-    case open(State#state.device, State#state.baud) of
-	{ok,Type,Port} ->
-	    {noreply, State#state { port=Port,port_type=Type,
-				    open_time=os:timestamp(),
-				    reopen_timer = undefined }};
-	{error,Reason} ->
-	    io:format("unable to open device ~s : ~p\n",
-		      [State#state.device, Reason]),
-	    Timer1 = erlang:start_timer(State#state.reopen_ival,self(),reopen),
-	    {noreply, State#state { port=undefined, reopen_timer=Timer1}}
-    end;
+handle_info(Message, State) when is_record(Message, nmea_message) ->
+    nmea_message(Message, State);
 
 handle_info({timeout,_Timer,{report,Ref}}, State) ->
     case lists:keytake(Ref, #subscription.mon, State#state.subscriptions) of
@@ -383,7 +227,7 @@ handle_info({timeout,_Timer,{report,Ref}}, State) ->
     end;
 
 handle_info({'DOWN',Mon,process,_Pid,_Reason}, State) ->
-    ?dbg("process ~p crashed reason ~p", [_Pid, _Reason]),
+    ?debug("process ~p crashed reason ~p", [_Pid, _Reason]),
     case lists:keytake(Mon, #subscription.mon, State#state.subscriptions) of
 	false ->
 	    {noreply, State};
@@ -424,96 +268,36 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-nmea_line(Line,{Date0,Time0},State) when is_list(Line) ->
-    Verify = verify_checksum(Line),
-    if Verify =:= valid; Verify =:= no_checksum ->
-	    case re:split(Line, ",", [{return,list}]) of
-		["$GPGGA",UTC,Lat,LatNS,Long,LongEW,Quality,_SatCount |
-		 _Various ] ->
-		    Valid = Quality =/= "0",
-		    set_state(Valid,
-			      [{lat, string_lat_dec(Lat,LatNS)},
-			       {long, string_long_dec(Long,LongEW)},
-			       {time, string_time(UTC,Time0)}], State);
+nmea_message(Message,State) ->
+    case {Message#nmea_message.id,Message#nmea_message.fields} of
+	{<<"GPGGA">>,
+	 [UTC,Lat,LatNS,Long,LongEW,Quality,_SatCount | _Various ]} ->
+	    Valid = Quality =/= <<"0">>,
+	    set_state(Valid,
+		      [{lat,  string_lat_dec(Lat,LatNS)},
+		       {long, string_long_dec(Long,LongEW)},
+		       {time, string_time(UTC)}], State);
+	{<<"GPRMC">>, 
+	 [UTC,Status,Lat,LatNS,Long,LongEW,
+	  Speed,_TrackAngle,Date | _Various]} ->
+	    %% _Various may be variant IGNORE!
+	    Valid = Status =:= <<"A">>,
+	    set_state(Valid,
+		      [{lat,   string_lat_dec(Lat,LatNS)},
+		       {long,  string_long_dec(Long,LongEW)},
+		       {speed, string_knot_kmh(Speed)},
+		       {date,  string_date(Date)},
+		       {time,  string_time(UTC)}
+		      ], State);
+	
+	{<<"GPGSA">>, [_Select,_Fix | _Various ]} -> %% ...
+	    %% DOP and active satellites
+	    {noreply,State};
 
-		["$GPRMC",UTC,Status,Lat,LatNS,Long,LongEW,
-		 Speed,_TrackAngle,Date | _Various] ->
-		    %% _Various may be variant IGNORE!
-		    Valid = Status =:= "A",
-		    set_state(Valid,
-			      [{lat,string_lat_dec(Lat,LatNS)},
-			       {long, string_long_dec(Long,LongEW)},
-			       {speed, string_knot_kmh(Speed)},
-			       {date, string_date(Date,Date0)},
-			       {time, string_time(UTC,Time0)}
-			      ], State);
-		["$GPGSA",_Select,_Fix | _Various ] -> %% ...
-		    %% DOP and active satellites
-		    {noreply,State};
-
-		["$GPGSV",_Num,_I | _Various ] -> %% ...
-		    %% Satellites in view
-		    {noreply,State};
-		_ ->
-		    ?dbg("Line: ~p\n", [Line]),
-		    {noreply,State}
-	    end;
-       true ->
-	    ?dbg("nmea_0183: verify error ~p\nLine:~s\n", [Verify,Line]),
+	{<<"GPGSV">>,[_Num,_I | _Various ]} -> %% ...
+	    %% Satellites in view
 	    {noreply,State}
     end.
-
-open(DeviceName) ->
-    open(DeviceName, ?DEFAULT_BAUD).
-open(DeviceName, Baud) ->
-    case file:read_file_info(DeviceName) of
-	{ok,Info} ->
-	    case Info#file_info.type of
-		device ->
-		    case uart:open(DeviceName,
-				   [{baud,Baud},{active,once},
-				    {buffer,1024},{packet,line}]) of
-			{ok,Port} ->
-			    {ok,device,Port};
-			Error ->
-			    Error
-		    end;
-		regular ->
-		    %% warn if file size is suspiciously small
-		    if Info#file_info.size < 80 ->
-			    io:format("WARNING: file ~s only has ~w bytes of data\n", [DeviceName, Info#file_info.size]);
-		       true ->
-			    ok
-		    end,
-		    case file:open(DeviceName, [read]) of
-			{ok,Fd} ->
-			    erlang:start_timer(20, self(), port_read),
-			    {ok,regular,Fd};
-			Error ->
-			    Error
-		    end;
-		_ ->
-		    {error, not_supported}
-	    end;
-	Error ->
-	    Error
-    end.
-
-
-%% checksum nmea string
-verify_checksum([$$ | Cs]) ->  checksum(Cs, 0);
-verify_checksum(_) -> {error, bad_format}.
-
-checksum([$*,X1,X2|_], Sum) ->
-    case catch list_to_integer([X1,X2],16) of
-	Sum ->
-	    valid;
-	_ ->
-	    {error,invalid_checksum}
-    end;
-checksum([$\r,$\n], _Sum) -> no_checksum;
-checksum([C|Cs], Sum) ->  checksum(Cs, C bxor Sum);
-checksum([],_) -> {error, bad_format}.
 
 
 set_state(true, KVs, State) ->
@@ -535,7 +319,6 @@ set_state(true, KVs, State) ->
     {noreply, State3};
 set_state(false, _KVs, State) ->
     {noreply, State}.
-
 
 set_state([{_Key,undefined}|KVs], State) ->
     set_state(KVs, State);
@@ -560,7 +343,7 @@ write_timestamp(Date, Time, State) ->
     if Size > 0, Date =/= undefined, Time =/= undefined ->
 	    GSec = calendar:datetime_to_gregorian_seconds({Date, Time}),
 	    Timestamp = GSec - ?UNIX_1970,
-	    ?dbg("Timestmp: ~w", [Timestamp]),
+	    ?debug("Timestmp: ~w", [Timestamp]),
 	    Pos  = State#state.log_pos,
 	    ets:insert(State#state.log, {Pos, {timestamp,Timestamp}}),
 	    Pos1 = (Pos + 1) rem Size,
@@ -573,10 +356,9 @@ write_timestamp(Date, Time, State) ->
     end.
 
 write_position(Lat, Long, State) ->
-    ?dbg("Lat:~f, Long:~f~n", [Lat, Long]),
+    ?debug("Lat:~f, Long:~f~n", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
-%%    if State#state.timestamp =/= undefined, Size > 0 ->
     if Size > 0 ->
 	    ets:insert(State#state.log, {Pos, {position,Lat,Long}}),
 	    Pos1 = (Pos + 1) rem Size,
@@ -626,50 +408,59 @@ fold_log(Tab, Pos, Len, Size, Fun, Acc) ->
     end.
 
 string_knot_kmh(Speed) ->
-    case string:to_float(Speed) of
-	{Knot,""} -> knot_to_kmh(Knot);
-	_ -> undefined
+    try binary_to_float(Speed) of
+	Knot -> knot_to_kmh(Knot)
+    catch
+	error:_ -> undefined
     end.
 
 integer_position({Lat, Long}) ->
     {trunc((Lat+90.0)*100000),trunc((Long+180.0)*100000)}.
 
-string_date(String,undefined) when String =/= "" ->
-    {D0,_} = string:to_integer(String),
-    Year = (D0 rem 100) + 2000,
-    D1 = D0 div 100,
-    Month = D1 rem 100,
-    D2 = D1 div 100,
-    Day = (D2 rem 100),
-    {Year,Month,Day};
-string_date(_String,FakeDate) ->
-    FakeDate.
+string_date(String) when String =/= <<"">> ->
+    try binary_to_integer(String) of
+	D0 ->
+	    Year = (D0 rem 100) + 2000,
+	    D1 = D0 div 100,
+	    Month = D1 rem 100,
+	    D2 = D1 div 100,
+	    Day = (D2 rem 100),
+	    {Year,Month,Day}
+    catch 
+	error:_ ->
+	    undefined
+    end.
 
-string_time(String,undefined) when String =/= "" ->
-    {T0f,_} = string:to_float(String++"."),
-    T0 = trunc(T0f),
-    Sec = T0 rem 100,
-    T1 = T0 div 100,
-    Min = T1 rem 100,
-    T2 = T1 div 100,
-    Hour = T2 rem 100,
-    {Hour,Min,Sec};
-string_time(_String,FakeTime) ->
-    FakeTime.
+string_time(String) when String =/= <<"">> ->
+    try binary_to_number(String) of
+	T0f ->
+	    T0 = trunc(T0f),
+	    Sec = T0 rem 100,
+	    T1 = T0 div 100,
+	    Min = T1 rem 100,
+	    T2 = T1 div 100,
+	    Hour = T2 rem 100,
+	    {Hour,Min,Sec}
+    catch
+	error:_ ->
+	    undefined
+    end.
 
-string_lat_dec(Lat,"N") -> string_deg_to_dec(Lat);
-string_lat_dec(Lat,"S") -> -string_deg_to_dec(Lat);
+string_lat_dec(Lat,<<"N">>) -> string_deg_to_dec(Lat);
+string_lat_dec(Lat,<<"S">>) -> -string_deg_to_dec(Lat);
 string_lat_dec(_Lat,_) -> undefined.
 
-string_long_dec(Long,"E") -> string_deg_to_dec(Long);
-string_long_dec(Long,"W") -> -string_deg_to_dec(Long);
+string_long_dec(Long,<<"E">>) -> string_deg_to_dec(Long);
+string_long_dec(Long,<<"W">>) -> -string_deg_to_dec(Long);
 string_long_dec(_Long,_) -> undefined.
 
 %% convert degree to decimal
 string_deg_to_dec(String) ->
-    case string:to_float(String) of
-	{Deg,""} -> deg_to_dec(Deg);
-	_ -> undefined
+    try binary_to_float(String) of
+	Deg -> deg_to_dec(Deg)
+    catch
+	error:_ ->
+	    undefined
     end.
 
 deg_to_dec(Deg) ->
@@ -679,3 +470,11 @@ deg_to_dec(Deg) ->
 
 knot_to_kmh(Knot) ->
     Knot*1.852.
+
+binary_to_number(String) ->
+    try binary_to_float(String) of
+	Float -> Float
+    catch
+	error:_ ->
+	    binary_to_integer(String)
+    end.

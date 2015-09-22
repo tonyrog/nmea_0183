@@ -17,24 +17,17 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%% NMEA 0183 application.
+%%% NMEA 2000 application api.
 %%%
-%%% Created:  21 Sep 2015 by Tony Rogvall
+%%% File: nmea_200.erl <br/>
+%%% Created:  9 Sep 2015 by Tony Rogvall
 %%% @end
 %%%-------------------------------------------------------------------
--module(nmea_0183_app).
 
--behaviour(application).
+-module(nmea_0183).
 
-%% Application callbacks
--export([start/2, stop/1]).
+-export([start/0]).
 
-%% ===================================================================
-%% Application callbacks
-%% ===================================================================
-
-start(_StartType, _StartArgs) ->
-    nmea_0183_sup:start_link().
-
-stop(_State) ->
-    ok.
+start() ->
+    application:start(uart),
+    application:start(nmea_0183).
