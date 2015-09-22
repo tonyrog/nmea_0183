@@ -85,12 +85,12 @@ start() ->
     start(1,[]).
 
 -spec start(BudId::integer()) -> {ok,pid()} | {error,Reason::term()}.
-start(BusId) ->
+start(BusId) when is_integer(BusId) ->
     start(BusId,[]).
 
 -spec start(BudId::integer(),Opts::[nmea_0183_uart_option()]) ->
 		   {ok,pid()} | {error,Reason::term()}.
-start(BusId, Opts) ->
+start(BusId, Opts) when is_integer(BusId) ->
     nmea_0183:start(),
     ChildSpec= {{?MODULE,BusId}, {?MODULE, start_link, [BusId,Opts]},
 		permanent, 5000, worker, [?MODULE]},
@@ -253,8 +253,9 @@ handle_cast(_Mesg, S) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({uart,U,Line}, S) when S#s.uart =:= U ->
-    case nmea_0183_lib:parse(Line) of
+handle_info({uart,U,Line}, S = #s { receiver = {_Mod,_Pid,If}}) 
+	    when S#s.uart =:= U ->
+    case nmea_0183_lib:parse(Line,If) of
 	{ok,Message} ->
 	    uart:setopt(U, active, once),
 	    input(Message, S),
