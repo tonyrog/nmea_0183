@@ -199,7 +199,9 @@ attach() ->
     gen_server:call(?SERVER, {attach, self(), {[], [], accept}}).
 
 attach(Accept) when is_list(Accept) ->
-    gen_server:call(?SERVER, {attach, self(), {Accept, [], reject}}).
+    gen_server:call(?SERVER, {attach, self(), {Accept, [], reject}});
+attach(Filter) when is_tuple(Filter) ->
+    gen_server:call(?SERVER, {attach, self(), Filter}).
 
 attach(Accept,Reject) when is_list(Accept), is_list(Reject) ->
     gen_server:call(?SERVER, {attach, self(), {Accept, Reject, accept}}).

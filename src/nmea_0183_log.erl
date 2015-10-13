@@ -167,6 +167,7 @@ init([Id,Opts]) ->
 %%--------------------------------------------------------------------
 
 handle_call({send,_Packet}, _From, S) ->
+    lager:debug("not sending: ~s", [nmea_0183_lib:format(_Packet)]),
     {reply, {error, read_only}, S};
 handle_call(statistics,_From,S) ->
     {reply,{ok,nmea_0183_counter:list()}, S};
