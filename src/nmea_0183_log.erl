@@ -27,6 +27,10 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+%% Test API
+-export([pause/1, resume/1, restart/1]).
+-export([dump/1]).
+
 -record(s, {
 	  receiver={nmea_0183_router, undefined, 0} ::
 	    {Module::atom(), %% Module to join and send to
@@ -38,6 +42,8 @@
 	  retry_interval,  %% Timeout for open retry
 	  retry_timer,     %% Timer reference for retry
 	  read_timer,      %% Timer for reading data entries
+	  rotate = true,   %% Rotate or run once
+	  paused = false,  %% Pause input
 	  last_ts,         %% last time
 	  fs               %% can_filter:new()
 	 }).
@@ -47,7 +53,11 @@
 	{receiver,  ReceiverPid::pid()} |
 	{file,      FileName::string()} |   %% Log file name
 	{max_rate,  MaxRate::integer()} |   %% Hz
-	{retry_interval, ReopenTimeout::timeout()}.
+	{retry_interval, ReopenTimeout::timeout()} |
+	{rotate, Rotate::boolean()} |
+	{accept, Accept::list(atom())} |
+	{reject, Accept::list(atom())} |
+	{default, accept | reject}.
 
 -define(SERVER, ?MODULE).
 
@@ -97,6 +107,20 @@ stop(BusId) ->
 	    Error
     end.
 
+-spec pause(BusId::integer()) -> ok | {error, Error::atom()}.
+pause(BusId) when is_integer(BusId) ->
+    gen_server:call(server(BusId), pause).
+-spec resume(BusId::integer()) -> ok | {error, Error::atom()}.
+resume(BusId) when is_integer(BusId) ->
+    gen_server:call(server(BusId), resume).
+-spec restart(BusId::integer()) -> ok | {error, Error::atom()}.
+restart(BusId) when is_integer(BusId) ->
+    gen_server:call(server(BusId), restart).
+
+-spec dump(BusId::integer()) -> ok | {error, Error::atom()}.
+dump(BusId) ->
+    gen_server:call(server(BusId),dump).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -124,25 +148,31 @@ init([Id,Opts]) ->
     Accept = proplists:get_value(accept, Opts, []),
     Reject = proplists:get_value(reject, Opts, []),
     Default = proplists:get_value(default, Opts, accept),
+    Rotate = proplists:get_value(rotate, Opts, true),
 
     File = proplists:get_value(file, Opts),
     if File =:= undefined ->
 	    ?error("nmea_0183_log: missing file argument"),
 	    {stop, einval};
        true ->
-	    case join(Router, Pid, {?MODULE,File,Id}) of
+	    LogFile = nmea_0183_lib:text_expand(File,[]),
+	    case join(Router, Pid, {?MODULE,LogFile,Id}) of
 		{ok, If} when is_integer(If) ->
 		    ?debug("nmea_0183_log:joined: intf=~w", [If]),
 		    S = #s{ receiver={Router,Pid,If},
-			    file = File,
+			    file = LogFile,
 			    max_rate = MaxRate,
 			    retry_interval = RetryInterval,
+			    rotate = Rotate,
 			    fs=nmea_0183_filter:new(Accept,Reject,Default)
 			  },
-		    ?info("nmea_0183_log: using file ~s\n", [File]),
+		    ?info("nmea_0183_log: using file ~s\n", [LogFile]),
 		    case open_logfile(S) of
-			{ok, S1} -> {ok, S1};
-			Error -> {stop, Error}
+			{ok, S1} -> 
+			    erlang:register(server(Id), self()),
+			    {ok, S1};
+			Error -> 
+			    {stop, Error}
 		    end;
 		{error, Reason} = E ->
 		    lager:error("Failed to join ~p(~p), reason ~p", 
@@ -170,9 +200,21 @@ handle_call({send,_Packet}, _From, S) ->
     {reply, {error, read_only}, S};
 handle_call(statistics,_From,S) ->
     {reply,{ok,nmea_0183_counter:list()}, S};
+handle_call(pause, _From, S) ->
+    {reply, ok, S#s {paused = true}};
+handle_call(resume, _From, S) ->
+    {reply, ok, S#s {paused = false}};
+handle_call(restart, _From, S) ->
+    {reply, ok, reopen_logfile(S)};
+handle_call(dump, _From, S) ->
+    lager:debug("dump.", []),
+    io:format("state = ~p\n", [S]),
+    {reply, ok, S};
+
 handle_call(stop, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Request, _From, S) ->
+    ?debug("got unknown request ~p\n", [_Request]),
     {reply, {error,bad_call}, S}.
 
 %%--------------------------------------------------------------------
@@ -206,8 +248,8 @@ handle_cast({get_filter,From}, S) ->
     Reply = nmea_0183_filter:get(S#s.fs),
     gen_server:reply(From, Reply),
     {noreply, S};
-handle_cast(_Mesg, S) ->
-    ?debug("nmea_0183_log: handle_cast: ~p\n", [_Mesg]),
+handle_cast(_Msg, S) ->
+    ?debug("got unknown msg ~p\n", [_Msg]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -229,13 +271,26 @@ handle_info({timeout,TRef,reopen},S) when TRef =:= S#s.retry_timer ->
 	    {stop, Error, S}
     end;
 
+handle_info({timeout,_Ref,read},S) when S#s.paused =:= true ->
+    %% Restart timer
+    Timer = start_timer(100, read),
+    {noreply, S#s { read_timer = Timer }};
+
 handle_info({timeout,Ref,read},S) when Ref =:= S#s.read_timer ->
     if S#s.fd =/= undefined ->
 	    case read(S#s.fd, S#s.receiver) of
 		eof ->
-		    {ok,0} = file:position(S#s.fd, 0),
-		    Timer = start_timer(100, read),
-		    {noreply, S#s { read_timer = Timer, last_ts = undefined }};
+		    case S#s.rotate of
+			true ->
+			    {ok,0} = file:position(S#s.fd, 0),
+			    Timer = start_timer(100, read),
+			    {noreply, S#s { read_timer = Timer, 
+					    last_ts = undefined }};
+			false ->
+			    close(S#s.fd),
+			    {noreply, S#s { fd = undefined,
+					    last_ts = undefined }}
+		    end;
 		{error,Reason} ->
 		    lager:warning("read error ~w",[Reason]),
 		    Td = trunc((1/S#s.max_rate)*1000),
@@ -258,7 +313,7 @@ handle_info({timeout,Ref,read},S) when Ref =:= S#s.read_timer ->
     end;
 
 handle_info(_Info, S) ->
-    ?debug("nmea_0183_log: got info ~p", [_Info]),
+    ?debug("got unknown info ~p", [_Info]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -336,6 +391,7 @@ input(Packet, S=#s {receiver = Receiver, fs = Fs}) ->
     case nmea_0183_filter:input(Packet, Fs) of
 	true ->
 	    input_packet(Packet, Receiver),
+	    lager:debug("Packet ~p", [Packet]),
 	    count(input_packets, S);
 	false ->
 	    S1 = count(input_packets, S),
@@ -370,3 +426,6 @@ read(Fd, {_Router,_Pid,Intf}) ->
 	{ok,Line} ->
 	    nmea_0183_lib:parse(Line,Intf)
     end.
+
+server(BusId) ->
+    list_to_atom(atom_to_list(?SERVER) ++ integer_to_list(BusId)).

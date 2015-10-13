@@ -45,6 +45,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+%% test api
+-export([dump/0]).
+
 -import(lists, [foreach/2, map/2, foldl/3]).
 
 -include_lib("lager/include/log.hrl").
@@ -198,8 +201,11 @@ call_if(Id, Request) ->
 attach() ->
     gen_server:call(?SERVER, {attach, self(), {[], [], accept}}).
 
+attach({Accept, Reject, Default})  ->
+    attach(Accept, Reject, Default);
 attach(Accept) when is_list(Accept) ->
     gen_server:call(?SERVER, {attach, self(), {Accept, [], reject}}).
+
 
 attach(Accept,Reject) when is_list(Accept), is_list(Reject) ->
     gen_server:call(?SERVER, {attach, self(), {Accept, Reject, accept}}).
@@ -273,6 +279,14 @@ stop() ->
     application:stop(nmea_0183).
 
 %%--------------------------------------------------------------------
+%% Test API
+%%--------------------------------------------------------------------
+-spec dump() -> ok | {error, Error::atom()}.
+
+dump() ->
+    gen_server:call(?SERVER,dump).
+
+%
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -402,10 +416,16 @@ handle_call({get_filter,Intf}, From, S) ->
 	    {noreply, S}
     end;
 
+handle_call(dump, _From, S) ->
+    lager:debug("dump.", []),
+    io:format("State = ~p\n", [S]),
+    {reply, ok, S};
+
 handle_call(stop, _From, S) ->
     {stop, normal, ok, S};
 
 handle_call(_Request, _From, S) ->
+    lager:debug("unknown request ~p.", [_Request]),
     {reply, {error, bad_call}, S}.
 
 %%--------------------------------------------------------------------
@@ -414,16 +434,19 @@ handle_call(_Request, _From, S) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({input,Pid,Message}, S) 
+handle_cast({input,Pid,Message} = M, S) 
   when is_pid(Pid),is_record(Message, nmea_message) ->
+    lager:debug("~p",[M]),
     S1 = count(stat_in, S),
     S2 = broadcast(Pid, Message, S1),
     {noreply, S2};
-handle_cast({send,Pid,Message}, S) 
+handle_cast({send,Pid,Message} = M, S) 
   when is_pid(Pid),is_record(Message, nmea_message) ->
+    lager:debug("~p",[M]),
     S1 = do_send(Pid, Message, S),
     {noreply, S1};
 handle_cast(_Msg, S) ->
+    lager:debug("unknown msg ~p.", [_Msg]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -465,6 +488,7 @@ handle_info({'EXIT', Pid, Reason}, S) ->
 	    {noreply,S}
     end;
 handle_info(_Info, S) ->
+    lager:debug("unknown info ~p.", [_Info]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
