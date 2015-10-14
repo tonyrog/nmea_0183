@@ -197,7 +197,8 @@ init([Id,Opts]) ->
 %%--------------------------------------------------------------------
 
 handle_call({send,_Packet}, _From, S) ->
-    lager:debug("not sending: ~s", [nmea_0183_lib:format(_Packet)]),
+    lager:debug("not sending: ~s", 
+		[iolist_to_binary(nmea_0183_lib:format(_Packet))]),
     {reply, {error, read_only}, S};
 handle_call(statistics,_From,S) ->
     {reply,{ok,nmea_0183_counter:list()}, S};
@@ -229,6 +230,8 @@ handle_call(_Request, _From, S) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({send,_Packet}, S) ->
+    lager:debug("not sending: ~s",
+		[iolist_to_binary(nmea_0183_lib:format(_Packet))]),
     {noreply, S};
 handle_cast({statistics,From},S) ->
     gen_server:reply(From, {ok,nmea_0183_counter:list()}),
