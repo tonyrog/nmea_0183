@@ -23,8 +23,9 @@
 %%% Created:  9 Sep 2015 by Tony Rogvall
 %%% @end
 %%%-------------------------------------------------------------------
-
 -module(nmea_0183).
+
+-include("../include/nmea_0183.hrl").
 
 -export([start/0]).
 -export([send/1, send_from/2]).
@@ -34,8 +35,25 @@ start() ->
     application:start(uart),
     application:start(nmea_0183).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% sends data to nmea_0183.
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec send(Message::#nmea_message{}) -> ok | {error, Error::atom()}.
+
 send(Message) ->
     nmea_0183_router:send(Message).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% sends data to nmea_0183.
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec send_from(Pid::pid(), Message::#nmea_message{}) -> 
+		  ok | {error, Error::atom()}.
 
 send_from(Pid, Message) ->
     nmea_0183_router:send(Pid, Message).
