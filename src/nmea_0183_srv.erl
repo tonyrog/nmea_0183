@@ -10,7 +10,6 @@
 %%%-------------------------------------------------------------------
 -module(nmea_0183_srv).
 
--include_lib("lager/include/log.hrl").
 -include_lib("kernel/include/file.hrl").
 -include("../include/nmea_0183.hrl").
 
@@ -227,7 +226,7 @@ handle_info({timeout,_Timer,{report,Ref}}, State) ->
     end;
 
 handle_info({'DOWN',Mon,process,_Pid,_Reason}, State) ->
-    ?debug("process ~p crashed reason ~p", [_Pid, _Reason]),
+    lager:debug("process ~p crashed reason ~p", [_Pid, _Reason]),
     case lists:keytake(Mon, #subscription.mon, State#state.subscriptions) of
 	false ->
 	    {noreply, State};
@@ -343,7 +342,7 @@ write_timestamp(Date, Time, State) ->
     if Size > 0, Date =/= undefined, Time =/= undefined ->
 	    GSec = calendar:datetime_to_gregorian_seconds({Date, Time}),
 	    Timestamp = GSec - ?UNIX_1970,
-	    ?debug("Timestmp: ~w", [Timestamp]),
+	    lager:debug("Timestamp: ~w", [Timestamp]),
 	    Pos  = State#state.log_pos,
 	    ets:insert(State#state.log, {Pos, {timestamp,Timestamp}}),
 	    Pos1 = (Pos + 1) rem Size,
@@ -356,7 +355,7 @@ write_timestamp(Date, Time, State) ->
     end.
 
 write_position(Lat, Long, State) ->
-    ?debug("Lat:~f, Long:~f~n", [Lat, Long]),
+    lager:debug("Lat:~f, Long:~f~n", [Lat, Long]),
     Pos  = State#state.log_pos,
     Size = State#state.log_size,
     if Size > 0 ->

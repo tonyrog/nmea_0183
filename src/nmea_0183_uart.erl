@@ -25,7 +25,6 @@
 
 -behaviour(gen_server).
 
--include_lib("lager/include/log.hrl").
 -include("../include/nmea_0183.hrl").
 
 %% API
@@ -145,12 +144,12 @@ init([Id,Opts]) ->
 	       Baud1 -> Baud1
 	   end,
     if Device =:= false; Device =:= "" ->
-	    ?error("nmea_0183_uart: missing device argument"),
+	    lager:error("missing device argument"),
 	    {stop, einval};
        true ->
 	    case join(Router, Pid, {?MODULE,Device,Id}) of
 		{ok, If} when is_integer(If) ->
-		    ?debug("nmea_0183_uart:joined: intf=~w", [If]),
+		    lager:debug("joined: intf=~w", [If]),
 		    S = #s{ receiver={Router,Pid,If},
 			    device = Device,
 			    offset = Id,
@@ -158,14 +157,14 @@ init([Id,Opts]) ->
 			    retry_interval = RetryInterval,
 			    fs=nmea_0183_filter:new()
 			  },
-		    ?info("nmea_0183_uart: using device ~s@~w\n", 
+		    lager:info("using device ~s@~w\n", 
 			  [Device, Baud]),
 		    case open(S) of
 			{ok, S1} -> {ok, S1};
 			Error -> {stop, Error}
 		    end;
 		{error, Reason} = E ->
-		    lager:error("Failed to join ~p(~p), reason ~p", 
+		    lager:error("~p(~p), reason ~p", 
 				[Router, Pid, Reason]),
 		    {stop, E}
 	    end
@@ -194,6 +193,7 @@ handle_call(statistics,_From,S) ->
 handle_call(stop, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Request, _From, S) ->
+    lager:debug("unknown request ~p\n", [_Request]),
     {reply, {error,bad_call}, S}.
 
 %%--------------------------------------------------------------------
@@ -229,7 +229,7 @@ handle_cast({get_filter,From}, S) ->
     gen_server:reply(From, Reply),
     {noreply, S};
 handle_cast(_Mesg, S) ->
-    ?debug("nmea_0183_uart: handle_cast: ~p\n", [_Mesg]),
+    lager:debug("unknown message ~p\n", [_Mesg]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -247,7 +247,7 @@ handle_info({uart,U,Line}, S = #s { receiver = {_Mod,_Pid,If}})
     case nmea_0183_lib:parse(Line,If) of
 	{error,Reason} ->
 	    uart:setopt(U, active, once),
-	    lager:warning("nmea_0183_uart: read error ~w",[Reason]),
+	    lager:warning("read error ~w",[Reason]),
 	    {noreply, S};
 	Message ->
 	    uart:setopt(U, active, once),
@@ -280,7 +280,7 @@ handle_info({timeout,TRef,reopen},S) when TRef =:= S#s.retry_timer ->
     end;
 
 handle_info(_Info, S) ->
-    ?debug("nmea_0183_uart: got info ~p", [_Info]),
+    lager:debug("unknown info ~p", [_Info]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -317,22 +317,22 @@ open(S0=#s {device = DeviceName, baud_rate = Baud }) ->
 		{csize, 8}, {stopb,1}, {parity,none}, {active, once}],
     case uart:open(DeviceName, UartOpts) of
 	{ok,Uart} ->
-	    ?debug("nmea_0183_uart:open: ~s@~w", [DeviceName,Baud]),
+	    lager:debug("~s@~w", [DeviceName,Baud]),
 	    {ok, S0#s { uart = Uart }};
 	{error,E} when E =:= eaccess; E =:= enoent ->
-	    ?debug("nmea_0183_uart:open: ~s@~w  error ~w, will try again "
-		   "in ~p msecs.", [DeviceName,Baud,E,S0#s.retry_interval]),
+	    lager:debug("~s@~w  error ~w, will try again in ~p msecs.", 
+			[DeviceName,Baud,E,S0#s.retry_interval]),
 	    {ok, reopen(S0)};
 	Error ->
-	    lager:error("nmea_0183_uart: error ~w", [Error]),
+	    lager:error("error ~w", [Error]),
 	    Error
     end.
 
 reopen(S) ->
     if S#s.uart =/= undefined ->
-	    ?debug("closing device ~s", [S#s.device]),
+	    lager:debug("closing device ~s", [S#s.device]),
 	    R = uart:close(S#s.uart),
-	    ?debug("closed ~p", [R]),
+	    lager:debug("closed ~p", [R]),
 	    R;
        true ->
 	    ok

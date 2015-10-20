@@ -7,7 +7,6 @@
 
 -module(nmea_0183_log).
 
--include_lib("lager/include/log.hrl").
 -include("../include/nmea_0183.hrl").
 
 -behaviour(gen_server).
@@ -152,13 +151,13 @@ init([Id,Opts]) ->
 
     File = proplists:get_value(file, Opts),
     if File =:= undefined ->
-	    ?error("nmea_0183_log: missing file argument"),
+	    lager:error("missing file argument"),
 	    {stop, einval};
        true ->
 	    LogFile = nmea_0183_lib:text_expand(File,[]),
 	    case join(Router, Pid, {?MODULE,LogFile,Id}) of
 		{ok, If} when is_integer(If) ->
-		    ?debug("nmea_0183_log:joined: intf=~w", [If]),
+		    lager:debug("joined: intf=~w", [If]),
 		    S = #s{ receiver={Router,Pid,If},
 			    file = LogFile,
 			    max_rate = MaxRate,
@@ -166,7 +165,7 @@ init([Id,Opts]) ->
 			    rotate = Rotate,
 			    fs=nmea_0183_filter:new(Accept,Reject,Default)
 			  },
-		    ?info("nmea_0183_log: using file ~s\n", [LogFile]),
+		    lager:info("using file ~s\n", [LogFile]),
 		    case open_logfile(S) of
 			{ok, S1} -> 
 			    erlang:register(server(Id), self()),
@@ -216,7 +215,7 @@ handle_call(dump, _From, S) ->
 handle_call(stop, _From, S) ->
     {stop, normal, ok, S};
 handle_call(_Request, _From, S) ->
-    ?debug("got unknown request ~p\n", [_Request]),
+    lager:debug("got unknown request ~p\n", [_Request]),
     {reply, {error,bad_call}, S}.
 
 %%--------------------------------------------------------------------
@@ -253,7 +252,7 @@ handle_cast({get_filter,From}, S) ->
     gen_server:reply(From, Reply),
     {noreply, S};
 handle_cast(_Msg, S) ->
-    ?debug("got unknown msg ~p\n", [_Msg]),
+    lager:debug("got unknown msg ~p\n", [_Msg]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -317,7 +316,7 @@ handle_info({timeout,Ref,read},S) when Ref =:= S#s.read_timer ->
     end;
 
 handle_info(_Info, S) ->
-    ?debug("got unknown info ~p", [_Info]),
+    lager:debug("got unknown info ~p", [_Info]),
     {noreply, S}.
 
 %%--------------------------------------------------------------------
@@ -352,23 +351,23 @@ code_change(_OldVsn, State, _Extra) ->
 open_logfile(S0=#s {file = File }) ->
     case open(File) of
 	{ok,Fd} ->
-	    ?debug("nmea_0183_log:open: ~s", [File]),
+	    lager:debug("open: ~s", [File]),
 	    Timer = start_timer(100, read),
 	    {ok, S0#s { fd = Fd, read_timer = Timer, last_ts = undefined }};
 	{error,E} when E =:= eaccess; E =:= enoent ->
-	    ?debug("nmea_0183_log:open: ~s  error ~w, will try again "
-		   "in ~p msecs.", [File,E,S0#s.retry_interval]),
+	    lager:debug("open: ~s error ~w, will try again in ~p msecs.", 
+			[File,E,S0#s.retry_interval]),
 	    {ok, reopen_logfile(S0)};
 	Error ->
-	    lager:error("nmea_0183_log: error ~w", [Error]),
+	    lager:error("error ~w", [Error]),
 	    Error
     end.
 
 reopen_logfile(S) ->
     if S#s.fd =/= undefined ->
-	    ?debug("closing file ~s", [S#s.file]),
+	    lager:debug("closing file ~s", [S#s.file]),
 	    R = close(S#s.fd),
-	    ?debug("closed ~p", [R]),
+	    lager:debug("closed ~p", [R]),
 	    R;
        true ->
 	    ok
