@@ -17,17 +17,45 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%% NMEA 2000 application api.
+%%% NMEA 0183 application api.
 %%%
-%%% File: nmea_200.erl <br/>
+%%% File: nmea_183.erl <br/>
 %%% Created:  9 Sep 2015 by Tony Rogvall
 %%% @end
 %%%-------------------------------------------------------------------
-
 -module(nmea_0183).
 
+-include("../include/nmea_0183.hrl").
+
 -export([start/0]).
+-export([send/1, send_from/2]).
+
 
 start() ->
     application:start(uart),
     application:start(nmea_0183).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% sends data to nmea_0183.
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec send(Message::#nmea_message{}) -> ok | {error, Error::atom()}.
+
+send(Message) ->
+    nmea_0183_router:send(Message).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% sends data to nmea_0183.
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec send_from(Pid::pid(), Message::#nmea_message{}) -> 
+		  ok | {error, Error::atom()}.
+
+send_from(Pid, Message) ->
+    nmea_0183_router:send(Pid, Message).
+
+    
