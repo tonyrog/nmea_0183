@@ -59,8 +59,7 @@
 
 -define(SERVER, ?MODULE).
 
-
--define(DEFAULT_RETRY_INTERVAL,  0183).
+-define(DEFAULT_RETRY_INTERVAL,  2000).
 -define(DEFAULT_BAUDRATE,        4800).
 -define(DEFAULT_IF,              0).
 
