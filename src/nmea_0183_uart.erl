@@ -243,13 +243,14 @@ handle_cast(_Mesg, S) ->
 %%--------------------------------------------------------------------
 handle_info({uart,U,Line}, S = #s { receiver = {_Mod,_Pid,If}}) 
 	    when S#s.uart =:= U ->
+    lager:debug("got data ~p",[Line]),
     case nmea_0183_lib:parse(Line,If) of
 	{error,Reason} ->
-	    uart:setopt(U, active, once),
+	    uart:setopts(U, [{active, once}]),
 	    lager:warning("read error ~w",[Reason]),
 	    {noreply, S};
 	Message ->
-	    uart:setopt(U, active, once),
+	    uart:setopts(U, [{active, once}]),
 	    input(Message, S),
 	    {noreply, S}
     end;
@@ -360,7 +361,8 @@ join(Module, undefined, Arg) when is_atom(Module) ->
 send_message(Message, S) when is_record(Message, nmea_message) ->
     Data = nmea_0183_lib:format(Message),
     S1 = count(output_packets, S),
-    {uart:send(Data), S1}.
+    lager:debug("send data ~p",[Data]),
+    {uart:send(S#s.uart, Data), S1}.
 
 
 input(Packet, S=#s {receiver = Receiver, fs = Fs}) ->
