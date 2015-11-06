@@ -407,7 +407,7 @@ fold_log(Tab, Pos, Len, Size, Fun, Acc) ->
     end.
 
 string_knot_kmh(Speed) ->
-    try binary_to_float(Speed) of
+    try bin_to_float(Speed) of
 	Knot -> knot_to_kmh(Knot)
     catch
 	error:_ -> undefined
@@ -417,7 +417,7 @@ integer_position({Lat, Long}) ->
     {trunc((Lat+90.0)*100000),trunc((Long+180.0)*100000)}.
 
 string_date(String) when String =/= <<"">> ->
-    try binary_to_integer(String) of
+    try bin_to_integer(String) of
 	D0 ->
 	    Year = (D0 rem 100) + 2000,
 	    D1 = D0 div 100,
@@ -431,7 +431,7 @@ string_date(String) when String =/= <<"">> ->
     end.
 
 string_time(String) when String =/= <<"">> ->
-    try binary_to_number(String) of
+    try bin_to_number(String) of
 	T0f ->
 	    T0 = trunc(T0f),
 	    Sec = T0 rem 100,
@@ -455,7 +455,7 @@ string_long_dec(_Long,_) -> undefined.
 
 %% convert degree to decimal
 string_deg_to_dec(String) ->
-    try binary_to_float(String) of
+    try erlang:binary_to_float(String) of
 	Deg -> deg_to_dec(Deg)
     catch
 	error:_ ->
@@ -470,10 +470,25 @@ deg_to_dec(Deg) ->
 knot_to_kmh(Knot) ->
     Knot*1.852.
 
-binary_to_number(String) ->
-    try binary_to_float(String) of
+bin_to_number(String) ->
+    try bin_to_float(String) of
 	Float -> Float
     catch
 	error:_ ->
-	    binary_to_integer(String)
+	    bin_to_integer(String)
+    end.
+
+
+bin_to_float(Bin) ->
+    try erlang:binary_to_float(Bin)
+    catch
+	error:undef ->
+	    list_to_float(binary_to_list(Bin))
+    end.
+
+bin_to_integer(Bin) ->
+    try erlang:binary_to_integer(Bin)
+    catch
+	error:undef ->
+	    list_to_integer(binary_to_list(Bin))
     end.
