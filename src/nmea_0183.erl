@@ -30,6 +30,9 @@
 -export([start/0]).
 -export([send/1, send_from/2]).
 
+%% Test api
+-export([pause/0, resume/0]).
+-export([pause/1, resume/1]).
 
 start() ->
     application:start(uart),
@@ -57,5 +60,31 @@ send(Message) ->
 
 send_from(Pid, Message) ->
     nmea_0183_router:send(Pid, Message).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Pause an interface.
+%% @end
+%%--------------------------------------------------------------------
+-spec pause(If::integer()) -> ok | {error, Reason::term()}.
+pause(If) when is_integer(If) ->
+    nmea_0183_router:pause(If).
+
+-spec pause() -> {error, Reason::term()}.
+pause() ->
+    {error, interface_required}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Resume an interface.
+%% @end
+%%--------------------------------------------------------------------
+-spec resume(If::integer()) -> ok | {error, Reason::term()}.
+resume(If) when is_integer(If) ->
+    nmea_0183_router:resume(If).
+    
+-spec resume() -> {error, Reason::term()}.
+resume() ->
+    {error, interface_required}.
 
     
