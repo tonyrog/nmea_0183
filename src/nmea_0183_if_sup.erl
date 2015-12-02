@@ -17,7 +17,7 @@
 %%% @author Malotte W Lonne <malotte@malotte.net>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%%  Can bus interface supervisor
+%%%  Nmea 0183 bus interface supervisor
 %%%
 %%% Created: 2013 by Malotte W Lonne 
 %%% @end
