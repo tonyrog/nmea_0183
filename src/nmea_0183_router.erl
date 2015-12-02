@@ -17,7 +17,7 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%%   CAN router
+%%%   NMEA_0183 router
 %%%
 %%% Created: 21 Sep 2015 by Tony Rogvall
 %%% @end
@@ -39,7 +39,9 @@
 -export([stop/1, restart/1]).
 -export([i/0, i/1]).
 -export([statistics/0]).
+-export([pause/1, resume/1]).
 -export([debug/2, interfaces/0, interface/1, interface_pid/1]).
+-export([config_change/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -56,16 +58,16 @@
 
 -record(nmea_if,
 	{
-	  pid,      %% can interface pid
+	  pid,      %% nmea_0183 interface pid
 	  id,       %% interface id
-	  mon,      %% can app monitor
+	  mon,      %% nmea_0183 app monitor
 	  param     %% match param normally {Mod,Name,Index} 
 	}).
 
 -record(nmea_app,
 	{
-	  pid,       %% can app pid
-	  mon,       %% can app monitor
+	  pid,       %% nmea_0183 app pid
+	  mon,       %% nmea_0183 app monitor
 	  interface, %% interface id
 	  filter     %% application filter
 	 }).
@@ -73,7 +75,7 @@
 -record(s,
 	{
 	  if_count = 1,  %% interface id counter
-	  apps = []      %% attached can applications
+	  apps = []      %% attached nmea_0183 applications
 	}).
 
 -define(CLOCK_TIME, 16#ffffffff).
@@ -149,6 +151,12 @@ interface_pid(Id) ->
 debug(Id, Bool) ->
     call_if(Id, {debug, Bool}).
 
+pause(Id) when is_integer(Id)->
+    call_if(Id, pause).    
+
+resume(Id) when is_integer(Id)->
+    call_if(Id, resume).    
+
 stop(Id) ->
     call_if(Id, stop).    
 
@@ -196,7 +204,7 @@ call_if(Id, Request) ->
 	    Error
     end.
 
-%% attach - simulated can bus or application
+%% attach - simulated nmea_0183 bus or application
 attach() ->
     gen_server:call(?SERVER, {attach, self(), {[], [], accept}}).
 
@@ -221,7 +229,7 @@ attach(Accept,Reject,Default) when is_list(Accept), is_list(Reject),
 detach() ->
     gen_server:call(?SERVER, {detach, self()}).
 
-%% add an interface to the simulated can_bus (may be a real canbus)
+%% add an interface to the simulated nmea_0183_bus (may be a real canbus)
 join(Params) ->
     gen_server:call(?SERVER, {join, self(), Params}).
 
@@ -265,6 +273,9 @@ input(Pid, Message) when is_record(Message, nmea_message) ->
 input_from(Pid,Message) when is_pid(Pid), is_record(Message, nmea_message) ->
     gen_server:cast(?SERVER, {input, Pid, Message}).
 
+config_change(Changed,New,Removed) ->
+    gen_server:call(?SERVER, {config_change,Changed,New,Removed}).
+
 %%--------------------------------------------------------------------
 %% Shortcut API
 %%--------------------------------------------------------------------
@@ -300,11 +311,12 @@ dump() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init(_Args) ->
+    %% Args = Args0 ++ application:get_all_env(nmea_0183),
     lager:start(),  %% ok testing, remain or go?
     process_flag(trap_exit, true),
-    can_counter:init(stat_in),   %% number of input packets received
-    can_counter:init(stat_out),  %% number of output packets  sent
-    can_counter:init(stat_err),  %% number of error packets received
+    nmea_0183_counter:init(stat_in),   %% number of input packets received
+    nmea_0183_counter:init(stat_out),  %% number of output packets  sent
+    nmea_0183_counter:init(stat_err),  %% number of error packets received
     {ok, #s{  }}.
 
 %%--------------------------------------------------------------------
@@ -422,6 +434,11 @@ handle_call(dump, _From, S) ->
     io:format("State = ~p\n", [S]),
     {reply, ok, S};
 
+handle_call({config_change,_Changed,_New,_Removed},_From,S) ->
+    lager:debug("config_change changed=~p, new=~p, removed=~p\n",
+		[_Changed,_New,_Removed]),
+    {reply, ok, S};
+
 handle_call(stop, _From, S) ->
     {stop, normal, ok, S};
 
@@ -513,7 +530,7 @@ code_change(_OldVsn, S, _Extra) ->
 %%--------------------------------------------------------------------
 
 count(Counter, S) ->
-    can_counter:update(Counter, 1),
+    nmea_0183_counter:update(Counter, 1),
     S.
 
 do_send(Pid, Message, S) ->
@@ -568,8 +585,8 @@ send_if(If, Message, S1) ->
     gen_server:cast(If#nmea_if.pid, {send, Message}),
     S2.
 
-%% Broadcast a message to applications/simulated can buses
-%% and joined CAN interfaces
+%% Broadcast a message to applications/simulated nmea_0183 buses
+%% and joined NMEA_0183 interfaces
 %% 
 broadcast(Sender,Message,S) ->
     S1 = broadcast_apps(Sender, Message, S#s.apps, S),
