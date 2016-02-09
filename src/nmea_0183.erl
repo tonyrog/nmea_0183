@@ -59,7 +59,7 @@ send(Message) ->
 		  ok | {error, Error::atom()}.
 
 send_from(Pid, Message) ->
-    nmea_0183_router:send(Pid, Message).
+    nmea_0183_router:send_from(Pid, Message).
 
 %%--------------------------------------------------------------------
 %% @doc

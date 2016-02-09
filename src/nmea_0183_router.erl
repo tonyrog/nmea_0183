@@ -537,8 +537,6 @@ do_send(Pid, Message, S) ->
     case Message#nmea_message.intf of
 	0 ->
 	    broadcast(Pid,Message,S);
-	undefined ->
-	    broadcast(Pid,Message,S);
 	I ->
 	    case get_interface_by_id(I) of
 		false -> 

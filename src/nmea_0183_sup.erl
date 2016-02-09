@@ -74,11 +74,8 @@ stop() ->
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
-
 -spec init(Args::list({Key::atom(), Value::term()})) -> 
-		  {ok, {SupFlags::list(), ChildSpecs::list()}} |
-		  ignore |
-		  {error, Reason::term()}.
+		  {ok, {SupFlags::tuple(), ChildSpecs::list(tuple())}}.
 init(Args) ->
     Router = {nmea_0183_router, {nmea_0183_router, start_link, [Args]},
 	      permanent, 5000, worker, [nmea_0183_router]},

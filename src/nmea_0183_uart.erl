@@ -47,7 +47,7 @@
 -record(s, {
 	  receiver={nmea_0183_router, undefined, 0} ::
 	    {Module::atom(), %% Module to join and send to
-	     Pid::pid(),     %% Pid if not default server
+	     Pid::pid() | undefined,     %% Pid if not default server
 	     If::integer()}, %% Interface id
 	  uart,            %% serial line port id
 	  device,          %% device name
