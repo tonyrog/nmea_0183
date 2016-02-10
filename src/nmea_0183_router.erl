@@ -164,9 +164,9 @@ restart(Id) ->
     case gen_server:call(?SERVER, {interface,Id}) of
 	{ok,If} ->
 	    case If#nmea_if.param of
-		{nmea_0183_actisense,_,N} ->
+		{nmea_0183_uart,_,N} ->
 		    ok = gen_server:call(If#nmea_if.pid, stop),
-		    nmea_0183_actisense:start(N)
+		    nmea_0183_uart:start(N)
 		%% add nmea_0183_file
 	    end;
 	Error ->
