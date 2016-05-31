@@ -31,7 +31,7 @@
 	 code_change/3]).
 
 %% Test API
--export([pause/1, resume/1, restart/1]).
+-export([pause/1, resume/1, restart/1, ifstatus/1]).
 -export([dump/1]).
 
 -record(s, {
@@ -117,6 +117,9 @@ pause(Id) when is_integer(Id); is_pid(Id) ->
 -spec resume(Id::integer()| pid()) -> ok | {error, Error::atom()}.
 resume(Id) when is_integer(Id); is_pid(Id) ->
     gen_server:call(server(Id), resume).
+-spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
+ifstatus(Id) when is_integer(Id); is_pid(Id) ->
+    gen_server:call(server(Id), ifstatus).
 -spec restart(Id::integer() | pid()) -> ok | {error, Error::atom()}.
 restart(Id) when is_integer(Id); is_pid(Id) ->
     gen_server:call(server(Id), restart).
@@ -214,6 +217,9 @@ handle_call(pause, _From, S) ->
 handle_call(resume, _From, S) ->
     lager:debug("resume.", []),
     {reply, ok, S#s {pause = false}};
+handle_call(ifstatus, _From, S=#s {pause = Pause}) ->
+    lager:debug("ifstatus.", []),
+    {reply, {ok, if Pause -> paused; true -> active end}, S};
 handle_call(restart, _From, S) ->
     lager:debug("restart.", []),
     {reply, ok, reopen_logfile(S)};

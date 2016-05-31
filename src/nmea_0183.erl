@@ -31,8 +31,10 @@
 -export([send/1, send_from/2]).
 
 %% Test api
--export([pause/0, resume/0]).
--export([pause/1, resume/1]).
+-export([pause/0, resume/0, ifstatus/0]).
+-export([pause/1, resume/1, ifstatus/1]).
+
+-define(ROUTER, nmea_0183_router).
 
 start() ->
     application:start(uart),
@@ -47,7 +49,7 @@ start() ->
 -spec send(Message::#nmea_message{}) -> ok | {error, Error::atom()}.
 
 send(Message) ->
-    nmea_0183_router:send(Message).
+    ?ROUTER:send(Message).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -59,7 +61,7 @@ send(Message) ->
 		  ok | {error, Error::atom()}.
 
 send_from(Pid, Message) ->
-    nmea_0183_router:send_from(Pid, Message).
+    ?ROUTER:send_from(Pid, Message).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,7 +70,7 @@ send_from(Pid, Message) ->
 %%--------------------------------------------------------------------
 -spec pause(If::integer()) -> ok | {error, Reason::term()}.
 pause(If) when is_integer(If) ->
-    nmea_0183_router:pause(If).
+    ?ROUTER:pause(If).
 
 -spec pause() -> {error, Reason::term()}.
 pause() ->
@@ -81,10 +83,24 @@ pause() ->
 %%--------------------------------------------------------------------
 -spec resume(If::integer()) -> ok | {error, Reason::term()}.
 resume(If) when is_integer(If) ->
-    nmea_0183_router:resume(If).
+    ?ROUTER:resume(If).
     
 -spec resume() -> {error, Reason::term()}.
 resume() ->
     {error, interface_required}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get active status of interface.
+%% @end
+%%--------------------------------------------------------------------
+-spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
+ifstatus(If) when is_integer(If) ->
+    ?ROUTER:ifstatus(If).
+    
+-spec ifstatus() -> {error, Reason::term()}.
+ifstatus() ->
+    {error, interface_required}.
+
 
     

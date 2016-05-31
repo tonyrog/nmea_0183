@@ -39,7 +39,7 @@
 -export([stop/1, restart/1]).
 -export([i/0, i/1]).
 -export([statistics/0]).
--export([pause/1, resume/1]).
+-export([pause/1, resume/1, ifstatus/1]).
 -export([debug/2, interfaces/0, interface/1, interface_pid/1]).
 -export([config_change/3]).
 
@@ -156,6 +156,9 @@ pause(Id) when is_integer(Id)->
 
 resume(Id) when is_integer(Id)->
     call_if(Id, resume).    
+
+ifstatus(Id) when is_integer(Id)->
+    call_if(Id, ifstatus).    
 
 stop(Id) ->
     call_if(Id, stop).    
