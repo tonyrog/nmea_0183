@@ -115,19 +115,19 @@ stop(BusId) ->
 	    Error
     end.
 
--spec pause(Id::integer()| pid()) -> ok | {error, Error::atom()}.
+-spec pause(Id::integer() | pid()) -> ok | {error, Error::atom()}.
 pause(Id) when is_integer(Id); is_pid(Id) ->
-    gen_server:call(server(Id), pause).
+    call(Id, pause).
 -spec resume(Id::integer()| pid()) -> ok | {error, Error::atom()}.
 resume(Id) when is_integer(Id); is_pid(Id) ->
-    gen_server:call(server(Id), resume).
+    call(Id, resume).
 -spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
 ifstatus(Id) when is_integer(Id); is_pid(Id) ->
-    gen_server:call(server(Id), ifstatus).
+    call(Id, ifstatus).
 
 -spec dump(Id::integer()| pid()) -> ok | {error, Error::atom()}.
 dump(Id) when is_integer(Id); is_pid(Id) ->
-    gen_server:call(server(Id),dump).
+    call(Id,dump).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -448,7 +448,10 @@ count(Counter,S) ->
     nmea_0183_counter:update(Counter, 1),
     S.
 
-server(Pid) when is_pid(Pid)->
-    Pid;
-server(BusId) when is_integer(BusId) ->
-    nmea_0183_router:interface_pid(BusId).
+call(Pid, Request) when is_pid(Pid) -> 
+    gen_server:call(Pid, Request);
+call(Id, Request) when is_integer(Id) ->
+    case can_router:interface_pid({?MODULE, Id})  of
+	Pid when is_pid(Pid) -> gen_server:call(Pid, Request);
+	Error -> Error
+    end.

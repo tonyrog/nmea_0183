@@ -39,7 +39,7 @@
 -export([stop/1, restart/1]).
 -export([i/0, i/1]).
 -export([statistics/0]).
--export([pause/1, resume/1, ifstatus/1]).
+-export([pause/1, resume/1, ifstatus/1, ifstatus/0]).
 -export([debug/2, interfaces/0, interface/1, interface_pid/1]).
 -export([config_change/3]).
 
@@ -136,17 +136,27 @@ interfaces() ->
     gen_server:call(?SERVER, interfaces).
 
 interface(Id) ->
-    IFs = interfaces(),
-    case lists:keysearch(Id, #nmea_if.id, IFs) of
-	false ->
-	    {error, enoent};
-	{value, IF} ->
-	    {ok,IF}
+   case gen_server:call(?SERVER, {interface, Id}) of
+	{ok,If} = Reply when is_record(If, nmea_if) ->
+	    Reply;
+	[If] when is_record(If, nmea_if) ->
+	    {ok, If};
+	[] ->
+	    {error,enoent};
+	Ifs when is_list(Ifs)->
+	    lager:warning("~p: several interfaces\n", [Ifs]),
+	    {error,not_unique};
+	{error,enoent} ->
+	    {error,enoent};
+	Error ->
+	    Error
     end.
-
+ 
 interface_pid(Id) ->
-    {ok,IF} = interface(Id),
-    IF#nmea_if.pid.
+    case interface(Id) of
+	{ok,IF} -> IF#nmea_if.pid;
+	Error -> Error
+    end.
 
 debug(Id, Bool) ->
     call_if(Id, {debug, Bool}).
@@ -159,6 +169,12 @@ resume(Id) when is_integer(Id)->
 
 ifstatus(Id) when is_integer(Id)->
     call_if(Id, ifstatus).    
+
+ifstatus() ->
+    %% For all interfaces
+    lists:foldl(fun(#nmea_if{pid = Pid, param = {BE, _, BI}}, Acc) ->
+			[{{BE, BI}, gen_server:call(Pid, ifstatus)} | Acc]
+		end, [], interfaces()).
 
 stop(Id) ->
     call_if(Id, stop).    
@@ -200,6 +216,14 @@ call_if(Id, Request) ->
     case gen_server:call(?SERVER, {interface,Id}) of
 	{ok,If} ->
 	    gen_server:call(If#nmea_if.pid, Request);
+	[If] when is_record(If, nmea_if)->
+	    gen_server:call(If#nmea_if.pid, Request);
+	[] ->
+	    lager:debug("~2w: no such interface\n", [Id]),
+	    {error,enoent};
+	Ifs when is_list(Ifs)->
+	    lager:warning("~p: several interfaces\n", [Ifs]),
+	    {error,not_unique};
 	{error,enoent} ->
 	    io:format("~2w: no such interface\n", [Id]),
 	    {error,enoent};
@@ -387,6 +411,8 @@ handle_call({interface,I}, _From, S) when is_integer(I) ->
 	If ->
 	    {reply, {ok,If}, S}
     end;
+handle_call({interface, {_BackEnd, _BusId} = B}, _From, S) ->
+    {reply, get_interface_by_backend(B), S};
 handle_call({interface,Param}, _From, S) ->
     case get_interface_by_param(Param) of
 	false ->
@@ -577,6 +603,13 @@ get_interface_by_param(Param) ->
 
 get_interface_by_pid(Pid) ->
     lists:keyfind(Pid, #nmea_if.pid, get_interface_list()).
+
+get_interface_by_backend({BackEnd, BusId}) ->
+    lists:foldl(fun(If=#nmea_if{param = {BE, _, BI}}, Acc) 
+		      when BE =:= BackEnd, BI =:= BusId -> [If | Acc];
+		   (_OtherIf, Acc) -> 
+			Acc
+		end, [], get_interface_list()).
 
 get_interface_list() ->
     [If || {{interface,_},If} <- get()].
