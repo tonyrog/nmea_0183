@@ -216,9 +216,15 @@ handle_call(pause, _From, S) ->
 handle_call(resume, _From, S) ->
     lager:debug("resume.", []),
     {reply, ok, S#s {pause = false}};
-handle_call(ifstatus, _From, S=#s {pause = Pause}) ->
+handle_call(ifstatus, _From, S=#s {pause = true}) ->
     lager:debug("ifstatus.", []),
-    {reply, {ok, if Pause -> paused; true -> active end}, S};
+    {reply, {ok, paused}, S};
+handle_call(ifstatus, _From, S=#s {pause = false, fd = undefined}) ->
+    lager:debug("ifstatus.", []),
+    {reply, {ok, faulty}, S};
+handle_call(ifstatus, _From, S) ->
+    lager:debug("ifstatus.", []),
+    {reply, {ok, active}, S};
 handle_call(restart, _From, S) ->
     lager:debug("restart.", []),
     {reply, ok, reopen_logfile(S)};
