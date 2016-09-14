@@ -269,8 +269,8 @@ handle_cast({send,Packet}, S=#s {uart = Uart})
   when Uart =/= undefined ->
     {_, S1} = send_message(Packet, S),
     {noreply, S1};
-handle_cast({send,Packet}, S) ->
-    lager:warning("Packet ~p dropped", [Packet]),
+handle_cast({send,_Packet}, S) ->
+    %% lager:warning("Packet ~p dropped", [Packet]),
     {noreply, S};
 handle_cast({statistics,From},S) ->
     gen_server:reply(From, {ok,nmea_0183_counter:list()}),
