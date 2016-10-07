@@ -381,7 +381,7 @@ open(S=#s {pause = true}) ->
 open(S0=#s {device = DeviceName, baud_rate = Baud }) ->
     UartOpts = [{mode,binary}, {baud, Baud}, {packet, line},
 		{csize, 8}, {stopb,1}, {parity,none}, {active, once}],
-    case uart:open(DeviceName, UartOpts) of
+    case uart:open1(DeviceName, UartOpts) of
 	{ok,Uart} ->
 	    lager:debug("~s@~w", [DeviceName,Baud]),
 	    {ok, S0#s { uart = Uart }};
