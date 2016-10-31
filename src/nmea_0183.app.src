@@ -1,13 +1,15 @@
+%% -*- erlang -*-
 {application, nmea_0183,
-    [
-    {description, ""},
-    {vsn, git},
-    {registered, []},
-    {applications, [
-        kernel,
-        stdlib,
-        uart
-    ]},
-    {mod, { nmea_0183_app, []}},
-    {env, []}
-    ]}.
+ [
+  {description, ""},
+  {vsn, git},
+  {registered, []},
+  {applications, [
+		  kernel,
+		  stdlib,
+		  uart,
+		  elarm
+		 ]},
+  {mod, { nmea_0183_app, []}},
+  {env, []}
+ ]}.
