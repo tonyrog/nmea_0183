@@ -226,6 +226,7 @@ handle_call(pause, _From, S=#s {pause = false, uart = Uart})
     lager:debug("closing device ~s", [S#s.device]),
     R = uart:close(S#s.uart),
     lager:debug("closed ~p", [R]),
+    elarm:clear(?ALARM, ?SUBSYS),
     {reply, ok, S#s {pause = true}};
 handle_call(pause, _From, S) ->
     lager:debug("pause when not active.", []),
