@@ -1,6 +1,6 @@
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2015, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -15,7 +15,8 @@
 %%%
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2015, Tony Rogvall
+%%% @author Malotte W Lönne <malotte@malotte.net>
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%% NMEA 0183 application api.
 %%%
@@ -68,8 +69,8 @@ send_from(Pid, Message) ->
 %% Pause an interface.
 %% @end
 %%--------------------------------------------------------------------
--spec pause(If::integer()) -> ok | {error, Reason::term()}.
-pause(If) when is_integer(If) ->
+-spec pause(If::integer() | string()) -> ok | {error, Reason::term()}.
+pause(If) when is_integer(If); is_list(If) ->
     ?ROUTER:pause(If).
 
 -spec pause() -> {error, Reason::term()}.
@@ -81,8 +82,8 @@ pause() ->
 %% Resume an interface.
 %% @end
 %%--------------------------------------------------------------------
--spec resume(If::integer()) -> ok | {error, Reason::term()}.
-resume(If) when is_integer(If) ->
+-spec resume(If::integer() | string()) -> ok | {error, Reason::term()}.
+resume(If) when is_integer(If); is_list(If) ->
     ?ROUTER:resume(If).
     
 -spec resume() -> {error, Reason::term()}.
@@ -94,8 +95,9 @@ resume() ->
 %% Get active status of interface.
 %% @end
 %%--------------------------------------------------------------------
--spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
-ifstatus(If) when is_integer(If) ->
+-spec ifstatus(If::integer() | string()) ->
+		      {ok, Status::atom()} | {error, Reason::term()}.
+ifstatus(If) when is_integer(If); is_list(If) ->
     ?ROUTER:ifstatus(If).
     
 -spec ifstatus() -> {error, Reason::term()}.

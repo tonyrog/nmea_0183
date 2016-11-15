@@ -1,6 +1,6 @@
 %%%---- BEGIN COPYRIGHT -------------------------------------------------------
 %%%
-%%% Copyright (C) 2015, Rogvall Invest AB, <tony@rogvall.se>
+%%% Copyright (C) 2016, Rogvall Invest AB, <tony@rogvall.se>
 %%%
 %%% This software is licensed as described in the file COPYRIGHT, which
 %%% you should have received as part of this distribution. The terms
@@ -16,6 +16,8 @@
 %%%---- END COPYRIGHT ---------------------------------------------------------
 %%%-------------------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
+%%% @author Marina Westman Lonne <malotte@malotte.net>
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%%    Read NMEA 0183 sentences/message from uart interface
 %%% @end
@@ -45,6 +47,7 @@
 	 code_change/3]).
 
 -record(s, {
+	  name::string(),
 	  receiver={nmea_0183_router, undefined, 0} ::
 	    {Module::atom(), %% Module to join and send to
 	     Pid::pid() | undefined,     %% Pid if not default server
@@ -62,6 +65,7 @@
 
 -type nmea_0183_uart_option() ::
 	{device,  DeviceName::string()} |
+	{name,    IfName::string()} |
 	{baud,    DeviceBaud::integer()} |
 	{retry_interval, ReopenTimeout::timeout()}.
 
@@ -117,18 +121,19 @@ stop(BusId) ->
 	    Error
     end.
 
--spec pause(Id::integer() | pid()) -> ok | {error, Error::atom()}.
-pause(Id) when is_integer(Id); is_pid(Id) ->
+-spec pause(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+pause(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, pause).
--spec resume(Id::integer()| pid()) -> ok | {error, Error::atom()}.
-resume(Id) when is_integer(Id); is_pid(Id) ->
+-spec resume(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+resume(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, resume).
--spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
-ifstatus(Id) when is_integer(Id); is_pid(Id) ->
+-spec ifstatus(If::integer() | pid() | string()) ->
+		      {ok, Status::atom()} | {error, Reason::term()}.
+ifstatus(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, ifstatus).
 
--spec dump(Id::integer()| pid()) -> ok | {error, Error::atom()}.
-dump(Id) when is_integer(Id); is_pid(Id) ->
+-spec dump(Id::integer()| pid() | string()) -> ok | {error, Error::atom()}.
+dump(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id,dump).
 
 %%%===================================================================
@@ -147,35 +152,39 @@ dump(Id) when is_integer(Id); is_pid(Id) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Id,Opts]) ->
-    Router = proplists:get_value(router, Opts, nmea_0183_router),
-    Pid = proplists:get_value(receiver, Opts, undefined),
-    RetryInterval = proplists:get_value(retry_interval,Opts,
-					?DEFAULT_RETRY_INTERVAL),
-    Pause = proplists:get_value(pause, Opts, false),
     Device = case proplists:get_value(device, Opts) of
 		 undefined ->
 		     %% try environment
 		     os:getenv("UART_DEVICE_" ++ integer_to_list(Id));
 		 D -> D
 	     end,
-    Baud = case proplists:get_value(baud, Opts) of
-	       undefined ->
-		   %% maybe UART_SPEED_<x>
-		   case os:getenv("UART_SPEED") of
-		       false -> ?DEFAULT_BAUDRATE;
-		       ""    -> ?DEFAULT_BAUDRATE;
-		       Baud0 -> list_to_integer(Baud0)
-		   end;
-	       Baud1 -> Baud1
-	   end,
     if Device =:= false; Device =:= "" ->
 	    lager:error("missing device argument"),
 	    {stop, einval};
        true ->
-	    case join(Router, Pid, {?MODULE,Device,Id}) of
+	    Name = proplists:get_value(name, Opts,
+				       atom_to_list(?MODULE) ++ "-" ++
+					   integer_to_list(Id)),
+	    Router = proplists:get_value(router, Opts, nmea_0183_router),
+	    Pid = proplists:get_value(receiver, Opts, undefined),
+	    RetryInterval = proplists:get_value(retry_interval,Opts,
+					       ?DEFAULT_RETRY_INTERVAL),
+	    Pause = proplists:get_value(pause, Opts, false),
+	    Baud = case proplists:get_value(baud, Opts) of
+		       undefined ->
+			  %% maybe UART_SPEED_<x>
+			  case os:getenv("UART_SPEED") of
+			      false -> ?DEFAULT_BAUDRATE;
+			      ""    -> ?DEFAULT_BAUDRATE;
+			      Baud0 -> list_to_integer(Baud0)
+			  end;
+		      Baud1 -> Baud1
+		  end,
+	    case join(Router, Pid, {?MODULE,Device,Id,Name}) of
 		{ok, If} when is_integer(If) ->
 		    lager:debug("joined: intf=~w", [If]),
-		    S = #s{ receiver={Router,Pid,If},
+		    S = #s{ name = Name,
+			    receiver={Router,Pid,If},
 			    device = Device,
 			    offset = Id,
 			    baud_rate = Baud,
@@ -184,7 +193,7 @@ init([Id,Opts]) ->
 			    fs=nmea_0183_filter:new()
 			  },
 		    lager:info("using device ~s@~w\n", 
-			  [Device, Baud]),
+			       [Device, Baud]),
 		    case open(S) of
 			{ok, S1} -> {ok, S1};
 			Error -> {stop, Error}
@@ -381,7 +390,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 open(S=#s {pause = true}) ->
     {ok, S};
-open(S0=#s {device = DeviceName, baud_rate = Baud }) ->
+open(S0=#s {name = Name, device = DeviceName, baud_rate = Baud }) ->
     UartOpts = [{mode,binary}, {baud, Baud}, {packet, line},
 		{csize, 8}, {stopb,1}, {parity,none}, {active, once}],
     case uart:open1(DeviceName, UartOpts) of
@@ -392,22 +401,25 @@ open(S0=#s {device = DeviceName, baud_rate = Baud }) ->
 	{error,E} when E =:= eaccess; E =:= enoent ->
 	    lager:debug("~s@~w  error ~w, will try again in ~p msecs.", 
 			[DeviceName,Baud,E,S0#s.retry_interval]),
-	    elarm:raise(?ALARM, ?SUBSYS, [{device, S0#s.device}]),
+	    elarm:raise(?ALARM, ?SUBSYS,
+			[{device, DeviceName}, {interface, Name}]),
 	    {ok, reopen(S0)};
 	Error ->
 	    lager:error("error ~w", [Error]),
-	    elarm:raise(?ALARM, ?SUBSYS, [{device, S0#s.device}]),
+	    elarm:raise(?ALARM, ?SUBSYS,
+			[{device, DeviceName}, {interface, Name}]),
 	    Error
     end.
 
 reopen(S=#s {pause = true}) ->
     S;
-reopen(S=#s {device = DeviceName}) ->
+reopen(S=#s {name = Name, device = DeviceName}) ->
     if S#s.uart =/= undefined ->
 	    lager:debug("closing device ~s", [DeviceName]),
 	    R = uart:close(S#s.uart),
 	    lager:debug("closed ~p", [R]),
-	    elarm:raise(?ALARM, ?SUBSYS, [{device, DeviceName}]),
+	    elarm:raise(?ALARM, ?SUBSYS,
+			[{device, DeviceName}, {interface, Name}]),
 	    R;
        true ->
 	    ok
@@ -463,7 +475,7 @@ count(Counter,S) ->
 
 call(Pid, Request) when is_pid(Pid) -> 
     gen_server:call(Pid, Request);
-call(Id, Request) when is_integer(Id) ->
+call(Id, Request) when is_integer(Id); is_list(Id) ->
     case can_router:interface_pid({?MODULE, Id})  of
 	Pid when is_pid(Pid) -> gen_server:call(Pid, Request);
 	Error -> Error

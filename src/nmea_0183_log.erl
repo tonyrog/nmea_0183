@@ -1,5 +1,22 @@
+%%%---- BEGIN COPYRIGHT -------------------------------------------------------
+%%%
+%%% Copyright (C) 2016, Rogvall Invest AB, <tony@rogvall.se>
+%%%
+%%% This software is licensed as described in the file COPYRIGHT, which
+%%% you should have received as part of this distribution. The terms
+%%% are also available at http://www.rogvall.se/docs/copyright.txt.
+%%%
+%%% You may opt to use, copy, modify, merge, publish, distribute and/or sell
+%%% copies of the Software, and permit persons to whom the Software is
+%%% furnished to do so, under the terms of the COPYRIGHT file.
+%%%
+%%% This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+%%% KIND, either express or implied.
+%%%
+%%%---- END COPYRIGHT ---------------------------------------------------------
 %%% @author Tony Rogvall <tony@rogvall.se>
-%%% @copyright (C) 2015, Tony Rogvall
+%%% @author Marina Westman Lonne <malotte@malotte.net>
+%%% @copyright (C) 2016, Tony Rogvall
 %%% @doc
 %%%    Read NMEA 0183 log files + work as a backend to nmea_0183_router
 %%% @end
@@ -35,6 +52,7 @@
 -export([dump/1]).
 
 -record(s, {
+	  name::string(),
 	  receiver={nmea_0183_router, undefined, 0} ::
 	    {Module::atom(), %% Module to join and send to
 	     Pid::pid() | undefined,     %% Pid if not default server
@@ -52,15 +70,16 @@
 	 }).
 
 -type nmea_0183_log_option() ::
+	{name,      IfName::string()} |
 	{router,    RouterName::atom()} |
 	{receiver,  ReceiverPid::pid()} |
 	{file,      FileName::string()} |   %% Log file name
 	{max_rate,  MaxRate::integer()} |   %% Hz
 	{retry_interval, ReopenTimeout::timeout()} |
-	{rotate, Rotate::boolean()} |
-	{pause, Pause::boolean()} |
-	{accept, Accept::list(atom())} |
-	{reject, Accept::list(atom())} |
+	{rotate,    Rotate::boolean()} |
+	{pause,     Pause::boolean()} |
+	{accept,    Accept::list(atom())} |
+	{reject,    Accept::list(atom())} |
 	{default, accept | reject}.
 
 -define(SERVER, ?MODULE).
@@ -111,21 +130,23 @@ stop(BusId) ->
 	    Error
     end.
 
--spec pause(Id::integer() | pid()) -> ok | {error, Error::atom()}.
-pause(Id) when is_integer(Id); is_pid(Id) ->
+-spec pause(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+pause(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, pause).
--spec resume(Id::integer()| pid()) -> ok | {error, Error::atom()}.
-resume(Id) when is_integer(Id); is_pid(Id) ->
+-spec resume(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+resume(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, resume).
--spec ifstatus(If::integer()) -> {ok, Status::atom()} | {error, Reason::term()}.
-ifstatus(Id) when is_integer(Id); is_pid(Id) ->
+-spec ifstatus(If::integer() | pid() | string()) ->
+		      {ok, Status::atom()} | {error, Reason::term()}.
+ifstatus(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, ifstatus).
--spec restart(Id::integer() | pid()) -> ok | {error, Error::atom()}.
-restart(Id) when is_integer(Id); is_pid(Id) ->
+
+-spec restart(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+restart(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id, restart).
 
--spec dump(Id::integer()| pid()) -> ok | {error, Error::atom()}.
-dump(Id) when is_integer(Id); is_pid(Id) ->
+-spec dump(Id::integer() | pid() | string()) -> ok | {error, Error::atom()}.
+dump(Id) when is_integer(Id); is_pid(Id); is_list(Id) ->
     call(Id,dump).
 
 %%%===================================================================
@@ -144,30 +165,34 @@ dump(Id) when is_integer(Id); is_pid(Id) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Id,Opts]) ->
-    Router = proplists:get_value(router, Opts, nmea_0183_router),
-    Pid = proplists:get_value(receiver, Opts, undefined),
-    RetryInterval = proplists:get_value(retry_interval,Opts,
-					?DEFAULT_RETRY_INTERVAL),
-    MaxRate0 = proplists:get_value(max_rate,Opts,?DEFAULT_MAX_RATE),
-    MaxRate = if is_number(MaxRate0), MaxRate0 > 0 -> MaxRate0;
-		 true -> ?DEFAULT_MAX_RATE
-	      end,
-    Accept = proplists:get_value(accept, Opts, []),
-    Reject = proplists:get_value(reject, Opts, []),
-    Default = proplists:get_value(default, Opts, accept),
-    Rotate = proplists:get_value(rotate, Opts, true),
-    Pause = proplists:get_value(pause, Opts, false),
-
     File = proplists:get_value(file, Opts),
     if File =:= undefined ->
 	    lager:error("missing file argument"),
 	    {stop, einval};
        true ->
 	    LogFile = nmea_0183_lib:text_expand(File,[]),
-	    case join(Router, Pid, {?MODULE,LogFile,Id}) of
+	    Name = proplists:get_value(name, Opts,
+				       atom_to_list(?MODULE) ++ "-" ++
+					   integer_to_list(Id)),
+	    Router = proplists:get_value(router, Opts, nmea_0183_router),
+	    Pid = proplists:get_value(receiver, Opts, undefined),
+	    RetryInterval = proplists:get_value(retry_interval,Opts,
+						?DEFAULT_RETRY_INTERVAL),
+	    MaxRate0 = proplists:get_value(max_rate,Opts,?DEFAULT_MAX_RATE),
+	    MaxRate = if is_number(MaxRate0), MaxRate0 > 0 -> MaxRate0;
+			 true -> ?DEFAULT_MAX_RATE
+		      end,
+	    Accept = proplists:get_value(accept, Opts, []),
+	    Reject = proplists:get_value(reject, Opts, []),
+	    Default = proplists:get_value(default, Opts, accept),
+	    Rotate = proplists:get_value(rotate, Opts, true),
+	    Pause = proplists:get_value(pause, Opts, false),
+
+	    case join(Router, Pid, {?MODULE,LogFile,Id,Name}) of
 		{ok, If} when is_integer(If) ->
 		    lager:debug("joined: intf=~w", [If]),
-		    S = #s{ receiver={Router,Pid,If},
+		    S = #s{ name = Name,
+			    receiver={Router,Pid,If},
 			    file = LogFile,
 			    max_rate = MaxRate,
 			    retry_interval = RetryInterval,
@@ -177,10 +202,8 @@ init([Id,Opts]) ->
 			  },
 		    lager:info("using file ~s\n", [LogFile]),
 		    case open_logfile(S) of
-			{ok, S1} -> 
-			    {ok, S1};
-			Error -> 
-			    {stop, Error}
+			{ok, S1} -> {ok, S1};
+			Error -> {stop, Error}
 		    end;
 		{error, Reason} = E ->
 		    lager:error("Failed to join ~p(~p), reason ~p", 
@@ -451,7 +474,7 @@ read(Fd, {_Router,_Pid,Intf}) ->
 
 call(Pid, Request) when is_pid(Pid) -> 
     gen_server:call(Pid, Request);
-call(Id, Request) when is_integer(Id) ->
+call(Id, Request) when is_integer(Id); is_list(Id) ->
     case can_router:interface_pid({?MODULE, Id})  of
 	Pid when is_pid(Pid) -> gen_server:call(Pid, Request);
 	Error -> Error
