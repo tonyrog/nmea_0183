@@ -475,7 +475,7 @@ read(Fd, {_Router,_Pid,Intf}) ->
 call(Pid, Request) when is_pid(Pid) -> 
     gen_server:call(Pid, Request);
 call(Id, Request) when is_integer(Id); is_list(Id) ->
-    case can_router:interface_pid({?MODULE, Id})  of
+    case nmea_0183_router:interface_pid({?MODULE, Id})  of
 	Pid when is_pid(Pid) -> gen_server:call(Pid, Request);
 	Error -> Error
     end.
