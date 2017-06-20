@@ -3,7 +3,7 @@
 #
 
 MODULES = \
-	nmea_0183_counter
+	nmea_0183_id_counter
 
 
 EBIN = .

@@ -20,7 +20,7 @@
 %%%    Nmea counter. For test.
 %%% Created : June 2017 by Malotte W Lönne
 %%% @end
--module(nmea_0183_counter).
+-module(nmea_0183_id_counter).
 -behaviour(gen_server).
 
 -include_lib("nmea_0183/include/nmea_0183.hrl").
