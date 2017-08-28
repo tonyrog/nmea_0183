@@ -240,7 +240,8 @@ handle_call(pause, _From, S=#s {pause = false, uart = Uart})
     {reply, ok, S#s {pause = true, alarm = false}};
 handle_call(pause, _From, S) ->
     lager:debug("pause when not active.", []),
-    {reply, ok, S#s {pause = true}};
+    elarm:clear(?ALARM, ?SUBSYS), %% If paused when faulty
+    {reply, ok, S#s {pause = true, alarm = false}};
 handle_call(resume, _From, S=#s {pause = true}) ->
     lager:debug("resume.", []),
     case open(S#s {pause = false}) of
