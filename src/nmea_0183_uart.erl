@@ -485,9 +485,11 @@ count(Counter,S) ->
     S.
 
 raise_alarm(Alarm, Name, DeviceName, Reason, Extra) ->
+    TS = timestamp_us(),
     elarm:raise(Alarm, ?SUBSYS,
 		[{id, Name}, {device, DeviceName},
-		 {timestamp, timestamp()},
+		 {timestamp, TS},
+		 {'timestamp-string', lists:flatten(exo_http:format_timestamp(TS))},
 		 {reason, Reason}] ++ Extra).
 
 call(Pid, Request) when is_pid(Pid) -> 
@@ -502,12 +504,10 @@ call(Id, Request) when is_integer(Id); is_list(Id) ->
 	Error -> Error
     end.
 
-timestamp() ->
-    TS = 
-	try erlang:system_time(micro_seconds)
-	catch
-	    error:undef ->
-		{MS,S,US} = os:timestamp(),
-		(MS*1000000+S)*1000000+US
-	end,
-    lists:flatten(exo_http:format_timestamp(TS)).
+timestamp_us() ->
+    try erlang:system_time(micro_seconds)
+    catch
+	error:undef ->
+	    {MS,S,US} = os:timestamp(),
+	    (MS*1000000+S)*1000000+US
+    end.
