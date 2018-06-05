@@ -39,6 +39,7 @@
 
 start() ->
     application:start(uart),
+    application:start(elarm),
     application:start(nmea_0183).
 
 %%--------------------------------------------------------------------
