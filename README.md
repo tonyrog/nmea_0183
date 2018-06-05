@@ -16,7 +16,7 @@ interface list is used in sys.config example:
     {nmea_0183,
       [{interfaces,
          [{nmea_0183_log,0,[{file,"priv/oland_log.gps"}]},
-          {name_0183_uart,1,[{device,"/dev/ttyUSB0"},{baud, 4800}]}
+          {nmea_0183_uart,1,[{device,"/dev/ttyUSB0"},{baud, 4800}]}
          ]}]}
 
 The backends can also be started manually with a start function
