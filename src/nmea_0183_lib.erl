@@ -18,6 +18,8 @@
 %% Take a NMEA log line from file or uart ...
 %% return #name_messagae or {error,Reason}
 
+parse(<<0,Line/binary>>, Intf) ->
+    parse(Line, Intf); %% Removing spurious zero
 parse(Line, Intf) ->
     case binary:split(Line, <<"*">>) of
 	[<<$$,Message/binary>>] ->  %% assume no checksum present

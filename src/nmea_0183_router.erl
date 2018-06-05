@@ -163,13 +163,13 @@ interface_pid(Id) ->
 debug(Id, Bool) ->
     call_if(Id, {debug, Bool}).
 
-pause(Id) when is_integer(Id)->
+pause(Id) when is_integer(Id); is_list(Id)->
     call_if(Id, pause).    
 
-resume(Id) when is_integer(Id)->
+resume(Id) when is_integer(Id); is_list(Id)->
     call_if(Id, resume).    
 
-ifstatus(Id) when is_integer(Id)->
+ifstatus(Id) when is_integer(Id); is_list(Id)->
     call_if(Id, ifstatus).    
 
 ifstatus() ->

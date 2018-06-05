@@ -72,7 +72,8 @@
 
 -define(SUBSYS, ?MODULE).
 -define(SERVER, ?MODULE).
--define(ALARM, 'interface-down').
+-define(ALARM_DOWN, 'interface-down').
+-define(ALARM_ERROR, 'interface-error').
 
 -define(DEFAULT_RETRY_INTERVAL,  2000).
 -define(DEFAULT_BAUDRATE,        4800).
@@ -230,18 +231,22 @@ handle_call({send,Packet}, _From, S) ->
     {reply, ok, S};
 handle_call(statistics,_From,S) ->
     {reply,{ok,nmea_0183_counter:list()}, S};
-handle_call(pause, _From, S=#s {pause = false, uart = Uart}) 
-  when Uart =/= undefined ->
+handle_call(pause, _From, S=#s {pause = false, uart = Uart}) ->
     lager:debug("pause.", []),
-    lager:debug("closing device ~s", [S#s.device]),
-    R = uart:close(S#s.uart),
-    lager:debug("closed ~p", [R]),
-    elarm:clear(?ALARM, ?SUBSYS),
-    {reply, ok, S#s {pause = true, alarm = false}};
-handle_call(pause, _From, S) ->
+    S1 = if Uart =/= undefined ->
+		 lager:debug("closing device ~s", [S#s.device]),
+		 R = uart:close(S#s.uart),
+		 lager:debug("closed ~p", [R]),
+		 S#s {uart = undefined};
+	    true ->
+		 S
+	 end,
+    elarm:clear(?ALARM_DOWN, ?SUBSYS),
+    elarm:clear(?ALARM_ERROR, ?SUBSYS),
+    {reply, ok, S1#s {pause = true, alarm = false}};
+handle_call(pause, _From, S=#s {pause = true}) ->
     lager:debug("pause when not active.", []),
-    elarm:clear(?ALARM, ?SUBSYS), %% If paused when faulty
-    {reply, ok, S#s {pause = true, alarm = false}};
+    {reply, ok, S};
 handle_call(resume, _From, S=#s {pause = true}) ->
     lager:debug("resume.", []),
     case open(S#s {pause = false}) of
@@ -328,11 +333,11 @@ handle_info({uart,U,Line}, S=#s{receiver = {_Mod,_Pid,If}, uart = U,
     case nmea_0183_lib:parse(Line,If) of
 	{error,Reason} ->
 	    uart:setopts(U, [{active, once}]),
-	    elarm:raise(?ALARM, ?SUBSYS,
-			[{id, Name}, {device, DeviceName}, {reason, Reason}]),
+	    raise_alarm(?ALARM_ERROR, Name, DeviceName, Reason, 
+			[{data, binary_to_list(Line)}]),
 	    {noreply, S#s {alarm = true}};
 	Message ->
-	    elarm:clear(?ALARM, ?SUBSYS),
+	    elarm:clear(?ALARM_ERROR, ?SUBSYS),
 	    uart:setopts(U, [{active, once}]),
 	    input(Message, S),
 	    {noreply, S#s {alarm = false}}
@@ -340,21 +345,17 @@ handle_info({uart,U,Line}, S=#s{receiver = {_Mod,_Pid,If}, uart = U,
 handle_info({uart_error,U,Reason},
 	    S=#s{uart = U, name = Name, device = DeviceName}) ->
     if Reason =:= enxio ->
-	    elarm:raise(?ALARM, ?SUBSYS,
-			[{id, Name}, {device, DeviceName},
-			 {reason, {enxio, "maybe unplugged?"}}]),
-	    {noreply, reopen(S#s {alarm = true})};
+	    raise_alarm(?ALARM_DOWN, Name, DeviceName, Reason, 
+			[{warning, "maybe unplugged?"}]);
        true ->
-	    elarm:raise(?ALARM, ?SUBSYS,
-			[{id, Name}, {device, DeviceName},
-			 {reason, {uart_error, Reason}}]),
-	    {noreply, S#s {alarm = true}}
-    end;
+	    raise_alarm(?ALARM_DOWN, Name, DeviceName, Reason, [])
+    end,
+    {noreply, reopen(S#s {alarm = true})};
+
 
 handle_info({uart_closed,U}, 
 	    S=#s{uart = U, name = Name, device = DeviceName}) ->
-    elarm:raise(?ALARM, ?SUBSYS,
-		[{id, Name}, {device, DeviceName}, {reason, uart_closed}]),
+    raise_alarm(?ALARM_DOWN, Name, DeviceName, uart_closed, []),
     S1 = reopen(S#s {alarm = true}),
     {noreply, S1};
 
@@ -405,19 +406,21 @@ open(S0=#s {name = Name, device = DeviceName, baud_rate = Baud }) ->
     UartOpts = [{mode,binary}, {baud, Baud}, {packet, line},
 		{csize, 8}, {stopb,1}, {parity,none}, {active, once}],
     case uart:open1(DeviceName, UartOpts) of
-	{ok,Uart} ->
+	{ok, Uart} ->
 	    lager:debug("~s@~w", [DeviceName,Baud]),
-	    elarm:clear(?ALARM, ?SUBSYS),
+	    elarm:clear(?ALARM_DOWN, ?SUBSYS),
+	    elarm:clear(?ALARM_ERROR, ?SUBSYS),
 	    {ok, S0#s { uart = Uart, alarm = false }};
 	{error,E} when E =:= eaccess; E =:= enoent ->
 	    lager:debug("~s@~w  error ~w, will try again in ~p msecs.", 
 			[DeviceName,Baud,E,S0#s.retry_interval]),
-	    elarm:raise(?ALARM, ?SUBSYS,
-			[{id, Name}, {device, DeviceName}, {reason, E}]),
+	    raise_alarm(?ALARM_DOWN, Name, DeviceName, E,
+			if E =:= enoent -> [{warning, "Maybe unplugged?"}];
+			   true -> []
+			end),
 	    {ok, reopen(S0#s {alarm = true})};
 	{error, E} ->
-	    elarm:raise(?ALARM, ?SUBSYS,
-			[{id, Name}, {device, DeviceName}, {reason, E}]),
+	    raise_alarm(?ALARM_DOWN, Name, DeviceName, E, []),
 	    {E, S0#s {alarm = true}}
     end.
 
@@ -481,6 +484,12 @@ count(Counter,S) ->
     nmea_0183_counter:update(Counter, 1),
     S.
 
+raise_alarm(Alarm, Name, DeviceName, Reason, Extra) ->
+    elarm:raise(Alarm, ?SUBSYS,
+		[{id, Name}, {device, DeviceName},
+		 {timestamp, timestamp_us()},
+		 {reason, Reason}] ++ Extra).
+
 call(Pid, Request) when is_pid(Pid) -> 
     gen_server:call(Pid, Request);
 call(Id, Request) when is_integer(Id); is_list(Id) ->
@@ -491,4 +500,12 @@ call(Id, Request) when is_integer(Id); is_list(Id) ->
     case nmea_0183_router:interface_pid(Interface)  of
 	Pid when is_pid(Pid) -> gen_server:call(Pid, Request);
 	Error -> Error
+    end.
+
+timestamp_us() ->
+    try erlang:system_time(micro_seconds)
+    catch
+	error:undef ->
+	    {MS,S,US} = os:timestamp(),
+	    (MS*1000000+S)*1000000+US
     end.
