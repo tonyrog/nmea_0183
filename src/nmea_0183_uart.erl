@@ -231,21 +231,22 @@ handle_call({send,Packet}, _From, S) ->
     {reply, ok, S};
 handle_call(statistics,_From,S) ->
     {reply,{ok,nmea_0183_counter:list()}, S};
-handle_call(pause, _From, S=#s {pause = false, uart = Uart}) 
-  when Uart =/= undefined ->
+handle_call(pause, _From, S=#s {pause = false, uart = Uart}) ->
     lager:debug("pause.", []),
-    lager:debug("closing device ~s", [S#s.device]),
-    R = uart:close(S#s.uart),
-    lager:debug("closed ~p", [R]),
+    S1 = if Uart =/= undefined ->
+		 lager:debug("closing device ~s", [S#s.device]),
+		 R = uart:close(S#s.uart),
+		 lager:debug("closed ~p", [R]),
+		 S#s {uart = undefined};
+	    true ->
+		 S
+	 end,
     elarm:clear(?ALARM_DOWN, ?SUBSYS),
     elarm:clear(?ALARM_ERROR, ?SUBSYS),
-    {reply, ok, S#s {pause = true, alarm = false}};
-handle_call(pause, _From, S) ->
+    {reply, ok, S1#s {pause = true, alarm = false}};
+handle_call(pause, _From, S=#s {pause = true}) ->
     lager:debug("pause when not active.", []),
-    elarm:clear(?ALARM_DOWN, ?SUBSYS),
-    elarm:clear(?ALARM_ERROR, ?SUBSYS),
-    %% If paused when faulty
-    {reply, ok, S#s {pause = true, alarm = false}};
+    {reply, ok, S};
 handle_call(resume, _From, S=#s {pause = true}) ->
     lager:debug("resume.", []),
     case open(S#s {pause = false}) of
@@ -486,7 +487,7 @@ count(Counter,S) ->
 raise_alarm(Alarm, Name, DeviceName, Reason, Extra) ->
     elarm:raise(Alarm, ?SUBSYS,
 		[{id, Name}, {device, DeviceName},
-		 {timestamp, timestamp()},
+		 {timestamp, timestamp_us()},
 		 {reason, Reason}] ++ Extra).
 
 call(Pid, Request) when is_pid(Pid) -> 
@@ -501,12 +502,10 @@ call(Id, Request) when is_integer(Id); is_list(Id) ->
 	Error -> Error
     end.
 
-timestamp() ->
-    TS = 
-	try erlang:system_time(micro_seconds)
-	catch
-	    error:undef ->
-		{MS,S,US} = os:timestamp(),
-		(MS*1000000+S)*1000000+US
-	end,
-    lists:flatten(exo_http:format_timestamp(TS)).
+timestamp_us() ->
+    try erlang:system_time(micro_seconds)
+    catch
+	error:undef ->
+	    {MS,S,US} = os:timestamp(),
+	    (MS*1000000+S)*1000000+US
+    end.
