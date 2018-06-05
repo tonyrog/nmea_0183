@@ -428,7 +428,7 @@ join(Module, Pid, Arg) when is_atom(Module), is_pid(Pid) ->
     Module:join(Pid, Arg);
 join(undefined, Pid, _Arg) when is_pid(Pid) ->
     %% No join
-    ?DEFAULT_IF;
+    {ok,?DEFAULT_IF};
 join(Module, undefined, Arg) when is_atom(Module) ->
     Module:join(Arg).
 
